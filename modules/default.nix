@@ -17,4 +17,10 @@ inputs: {
   };
   network = ./network.nix;
   access = ./access.nix;
+  secrets = {
+    imports = [
+      inputs.sops-nix.nixosModules.sops
+      ./secrets.nix
+    ];
+  };
 }

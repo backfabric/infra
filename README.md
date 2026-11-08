@@ -23,7 +23,8 @@ Status: work in progress.
   `checks.x86_64-linux.example-single-disk`.
 - `docs/`: operational runbooks:
   [replacing a failed disk](docs/disk-replacement.md),
-  [unlocking the disks over SSH](docs/initrd-unlock.md).
+  [unlocking the disks over SSH](docs/initrd-unlock.md),
+  [managing secrets](docs/secrets.md).
 
 ## Subsystems
 
@@ -48,6 +49,12 @@ Status: work in progress.
   disks, see [docs/initrd-unlock.md](docs/initrd-unlock.md). Set
   `authorizedKeys` and both ports, and install the initrd host key at
   `initrdSsh.hostKey` with nixos-anywhere `--extra-files`.
+- `secrets`: sops-nix, decrypting with the SSH ed25519 host key
+  (`/etc/ssh/ssh_host_ed25519_key`) only; no options of its own. Set
+  `sops.defaultSopsFile` to the encrypted file; other subsystems declare
+  their own `sops.secrets.*`. Install the host key with
+  nixos-anywhere `--extra-files` so the first boot can decrypt, see
+  [docs/secrets.md](docs/secrets.md).
 
 ## Checks
 
