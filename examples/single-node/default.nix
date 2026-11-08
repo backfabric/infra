@@ -1,13 +1,39 @@
 # Example single-node host. Contains no real host data; it exists so that
 # `nix flake check` evaluates the modules in a complete NixOS configuration.
+# Addresses are from the documentation ranges (RFC 5737, RFC 3849, RFC 7042).
 {
   nixpkgs.hostPlatform = "x86_64-linux";
+  networking.hostName = "example";
 
   # Fake disk ids; a real host takes them from `ls -l /dev/disk/by-id`.
   backfabric.disks.devices = [
     "/dev/disk/by-id/nvme-EXAMPLE_DISK_0"
     "/dev/disk/by-id/nvme-EXAMPLE_DISK_1"
   ];
+
+  backfabric.network = {
+    macAddress = "00:00:5e:00:53:01";
+    ipv4 = {
+      address = "203.0.113.10";
+      gateway = "203.0.113.1";
+    };
+    ipv6.address = "2001:db8::2/64";
+  };
+
+  backfabric.access = {
+    authorizedKeys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE example"
+    ];
+    ssh.port = 2222;
+    initrdSsh.port = 2223;
+  };
+
+  # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,
+  # with the report generated on the server by nixos-facter. This stub only
+  # names a network driver so that the initrd networking path is evaluated.
+  hardware.facter.report = {
+    hardware.network_controller = [ { driver_modules = [ "igb" ]; } ];
+  };
 
   system.stateVersion = "26.05";
 }

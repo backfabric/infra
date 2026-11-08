@@ -21,8 +21,9 @@ Status: work in progress.
 - `examples/single-node/`: an example host with two disks, evaluated by
   `checks.x86_64-linux.example-single-node`, and with one disk by
   `checks.x86_64-linux.example-single-disk`.
-- `docs/`: operational runbooks, e.g.
-  [replacing a failed disk](docs/disk-replacement.md).
+- `docs/`: operational runbooks:
+  [replacing a failed disk](docs/disk-replacement.md),
+  [unlocking the disks over SSH](docs/initrd-unlock.md).
 
 ## Subsystems
 
@@ -33,6 +34,20 @@ Status: work in progress.
   `backfabric.disks.devices` to the `/dev/disk/by-id/...` paths of the
   system disks. When installing with nixos-anywhere, pass the LUKS passphrase
   with `--disk-encryption-keys /tmp/disk-encryption.key <file>`.
+- `network`: static IPv4 and IPv6 on the uplink, matched by MAC address,
+  with systemd-networkd, in the booted system and in the initrd. Set
+  `backfabric.network.macAddress`, `ipv4.address`, `ipv4.gateway`, and
+  `ipv6.address` (with `/64`) from the Hetzner Robot; `ipv6.gateway`
+  (`fe80::1`) and `nameservers` (Hetzner's resolvers) have defaults. The
+  initrd network driver comes from nixos-facter: set
+  `hardware.facter.reportPath` to the host's report, generated on the server
+  with `nixos-facter > facter.json`. Evaluation fails without it.
+- `access`: root login with SSH keys only on `backfabric.access.ssh.port`,
+  the only port open in the (nftables) firewall; no ping replies. The initrd
+  runs an SSH server on `backfabric.access.initrdSsh.port` to unlock the
+  disks, see [docs/initrd-unlock.md](docs/initrd-unlock.md). Set
+  `authorizedKeys` and both ports, and install the initrd host key at
+  `initrdSsh.hostKey` with nixos-anywhere `--extra-files`.
 
 ## Checks
 
