@@ -15,4 +15,6 @@ inputs: {
       ./disks.nix
     ];
   };
+  network = ./network.nix;
+  access = ./access.nix;
 }

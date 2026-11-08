@@ -1,0 +1,110 @@
+# Static networking for a Hetzner dedicated server, in the booted system and
+# in the systemd initrd (so that the disks can be unlocked over SSH).
+#
+# One systemd-networkd unit matches the uplink by MAC address, because
+# predictable interface names depend on the systemd version. The IPv4 address
+# is configured as /32 with the gateway as peer, as Hetzner documents for
+# dedicated servers: the main IPv4 comes from a larger subnet, but the server
+# may only talk to its gateway.
+#
+# The NIC kernel module for the initrd comes from nixos-facter
+# (`hardware.facter` in nixpkgs): with a report and initrd networking enabled,
+# it adds the drivers of the detected network controllers to
+# `boot.initrd.kernelModules`.
+{ config, lib, ... }:
+let
+  cfg = config.backfabric.network;
+
+  uplink = {
+    matchConfig.MACAddress = cfg.macAddress;
+    addresses = [
+      {
+        Address = "${cfg.ipv4.address}/32";
+        Peer = "${cfg.ipv4.gateway}/32";
+      }
+    ];
+    address = [ cfg.ipv6.address ];
+    gateway = [
+      cfg.ipv4.gateway
+      cfg.ipv6.gateway
+    ];
+    dns = cfg.nameservers;
+  };
+in
+{
+  options.backfabric.network = {
+    macAddress = lib.mkOption {
+      type = lib.types.strMatching "([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}";
+      example = "00:00:5e:00:53:01";
+      description = "MAC address of the uplink interface.";
+    };
+
+    ipv4 = {
+      address = lib.mkOption {
+        type = lib.types.str;
+        example = "203.0.113.10";
+        description = "Main IPv4 address, without prefix length; configured as /32.";
+      };
+      gateway = lib.mkOption {
+        type = lib.types.str;
+        example = "203.0.113.1";
+        description = "IPv4 gateway, as shown in the Hetzner Robot.";
+      };
+    };
+
+    ipv6 = {
+      address = lib.mkOption {
+        type = lib.types.strMatching ".+/64";
+        example = "2001:db8::2/64";
+        description = "IPv6 address from the server's /64 subnet, with prefix length.";
+      };
+      gateway = lib.mkOption {
+        type = lib.types.str;
+        default = "fe80::1";
+        description = "IPv6 gateway; Hetzner uses the link-local address fe80::1.";
+      };
+    };
+
+    nameservers = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      # https://docs.hetzner.com/robot/dedicated-server/general-information/recursive-name-servers/
+      default = [
+        "185.12.64.1"
+        "185.12.64.2"
+        "2a01:4ff:ff00::add:1"
+        "2a01:4ff:ff00::add:2"
+      ];
+      description = ''
+        Recursive DNS servers. The default are Hetzner's resolvers, which only
+        answer servers inside Hetzner's data centers.
+      '';
+    };
+  };
+
+  config = {
+    assertions = [
+      {
+        assertion =
+          config.hardware.facter.enable
+          && config.hardware.facter.detected.boot.initrd.networking.kernelModules != [ ];
+        message = ''
+          backfabric.network: no network driver for the initrd, so the disks
+          could not be unlocked over SSH. Set hardware.facter.reportPath to the
+          host's nixos-facter report.
+        '';
+      }
+    ];
+
+    networking.useNetworkd = true;
+    networking.useDHCP = false;
+    systemd.network.networks."10-uplink" = uplink;
+
+    # With a report, facter enables DHCP on every detected interface.
+    hardware.facter.detected.dhcp.enable = false;
+
+    boot.initrd.systemd.enable = true;
+    # Also makes facter add the NIC drivers to the initrd.
+    boot.initrd.network.enable = true;
+    boot.initrd.systemd.network.networks."10-uplink" = uplink;
+  };
+}
