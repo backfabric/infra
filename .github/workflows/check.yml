@@ -1,0 +1,21 @@
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v23
+      # Evaluation only: nothing is built and no VM tests run.
+      - name: Evaluate flake
+        run: nix flake check --no-build --all-systems
+      - name: Check formatting
+        run: nix fmt -- --ci
