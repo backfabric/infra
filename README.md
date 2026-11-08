@@ -13,10 +13,26 @@ Status: work in progress.
 
 - `modules/<subsystem>.nix`: one NixOS module per subsystem, with options
   under `backfabric.<subsystem>`. Each subsystem is registered in
-  `modules/default.nix` and exported as `nixosModules.<subsystem>`.
+  `modules/default.nix` and exported as `nixosModules.<subsystem>`. The
+  registry is a function of the flake inputs, so an entry also imports the
+  NixOS modules of the inputs its subsystem needs (e.g. disko for `disks`);
+  consumers only import modules from this flake.
 - `nixosModules.default` imports every subsystem module.
-- `examples/single-node/`: an example host evaluated by
-  `checks.x86_64-linux.example-single-node`.
+- `examples/single-node/`: an example host with two disks, evaluated by
+  `checks.x86_64-linux.example-single-node`, and with one disk by
+  `checks.x86_64-linux.example-single-disk`.
+- `docs/`: operational runbooks, e.g.
+  [replacing a failed disk](docs/disk-replacement.md).
+
+## Subsystems
+
+- `disks`: per system disk a BIOS boot partition, an ESP, and a LUKS
+  partition; one btrfs file system across all disks, raid1 with two or more
+  (subvolumes `@` for `/`, `@nix` for `/nix`); GRUB mirrored to every disk
+  for BIOS and UEFI boot. Set
+  `backfabric.disks.devices` to the `/dev/disk/by-id/...` paths of the
+  system disks. When installing with nixos-anywhere, pass the LUKS passphrase
+  with `--disk-encryption-keys /tmp/disk-encryption.key <file>`.
 
 ## Checks
 

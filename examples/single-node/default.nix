@@ -3,13 +3,11 @@
 {
   nixpkgs.hostPlatform = "x86_64-linux";
 
-  # Temporary values so the configuration evaluates.
-  # Stage 2 (disks and boot) replaces them with the backfabric disk layout.
-  boot.loader.grub.devices = [ "nodev" ];
-  fileSystems."/" = {
-    device = "/dev/disk/by-label/nixos";
-    fsType = "ext4";
-  };
+  # Fake disk ids; a real host takes them from `ls -l /dev/disk/by-id`.
+  backfabric.disks.devices = [
+    "/dev/disk/by-id/nvme-EXAMPLE_DISK_0"
+    "/dev/disk/by-id/nvme-EXAMPLE_DISK_1"
+  ];
 
   system.stateVersion = "26.05";
 }
