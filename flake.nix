@@ -59,7 +59,7 @@
         ];
       };
 
-      # The facts the install command reads (fleet/facts.nix), as an
+      # The facts the install and sops commands read (fleet/facts.nix), as an
       # evaluation-only check.
       fleetFacts =
         name: system: reportPathOk:
@@ -68,6 +68,7 @@
         in
         assert facts.address == "203.0.113.10";
         assert facts.initrdHostKey == "/etc/secrets/initrd/ssh_host_ed25519_key";
+        assert facts.hostPublicKey == builtins.readFile ./examples/single-node/ssh_host_ed25519_key.pub;
         assert reportPathOk facts.reportPath;
         nixpkgs.legacyPackages.x86_64-linux.writeText name (
           builtins.toJSON (removeAttrs facts [ "reportPath" ])
@@ -82,10 +83,12 @@
 
       lib.mkFleetShell = import ./fleet/shell.nix;
 
-      # The install command on its own, for a host whose public keys do not
-      # exist yet (see docs/fleet-shell.md).
+      # The install and sops commands on their own, for a host whose public
+      # keys do not exist yet (see docs/fleet-shell.md).
       packages = forAllSystems (pkgs: {
         backfabric-install = pkgs.callPackage ./fleet/install.nix { };
+        backfabric-sops-init = pkgs.callPackage ./fleet/sops-init.nix { };
+        backfabric-sops-add-host = pkgs.callPackage ./fleet/sops-add-host.nix { };
       });
 
       # Evaluated by `nix flake check --no-build`, like the checks.

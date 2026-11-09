@@ -103,5 +103,7 @@ pkgs.mkShellNoCC {
     pkgs.sops
     pkgs.ssh-to-age
     (pkgs.callPackage ./install.nix { })
+    (pkgs.callPackage ./sops-init.nix { })
+    (pkgs.callPackage ./sops-add-host.nix { })
   ];
 }

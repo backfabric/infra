@@ -1,6 +1,7 @@
-# Facts the install command needs, from a `nixosConfigurations.<host>` entry
-# that may not be installable yet: its nixos-facter report and public key
-# files may be missing.
+# Facts the install and sops commands need, from a `nixosConfigurations.<host>`
+# entry that may not be installable yet: its nixos-facter report and public key
+# files may be missing. Each command reads only the attributes it needs;
+# `hostPublicKey` requires the host's public key file.
 #
 # Any access to `config` first runs the module system's check for
 # definitions of undeclared options, which evaluates the condition of every
@@ -20,6 +21,7 @@ in
 {
   address = config.backfabric.network.ipv4.address;
   initrdHostKey = config.backfabric.access.initrdSsh.hostKey;
+  hostPublicKey = config.backfabric.access.hostKey.publicKey;
   reportPath =
     if config.hardware.facter.reportPath == null then
       null

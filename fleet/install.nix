@@ -2,13 +2,12 @@
 # flake package, so that a host can be installed before its public keys
 # exist (the dev shell needs them).
 {
+  callPackage,
   writeShellApplication,
   coreutils,
   gitMinimal,
   jq,
   nixos-anywhere,
-  sops,
-  ssh-to-age,
 }:
 writeShellApplication {
   name = "backfabric-install";
@@ -20,8 +19,7 @@ writeShellApplication {
     gitMinimal
     jq
     nixos-anywhere
-    sops
-    ssh-to-age
+    (callPackage ./sops-add-host.nix { })
   ];
   text = ''
     factsNix=${./facts.nix}
