@@ -7,22 +7,24 @@
   gitMinimal,
   jq,
   nixos-anywhere,
-  openssh,
   sops,
   ssh-to-age,
 }:
 writeShellApplication {
   name = "backfabric-install";
-  # `nix` is deliberately not listed: the operator's own Nix evaluates the
-  # private repository.
+  # Deliberately not listed: `nix` (the operator's own Nix evaluates the
+  # private repository) and openssh (ssh and ssh-keygen are the operator's
+  # own client, as in the fleet shell's ssh wrapper).
   runtimeInputs = [
     coreutils
     gitMinimal
     jq
     nixos-anywhere
-    openssh
     sops
     ssh-to-age
   ];
-  text = builtins.readFile ./install.sh;
+  text = ''
+    factsNix=${./facts.nix}
+  ''
+  + builtins.readFile ./install.sh;
 }

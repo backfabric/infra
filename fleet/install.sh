@@ -48,31 +48,20 @@ host=$1
 
 [[ -f flake.nix ]] || die "no flake.nix in $PWD; run from the root of the private repository"
 repo=$(git rev-parse --show-toplevel 2>/dev/null) || die "$PWD is not in a git repository"
+# The SSH client is the operator machine's own (in the fleet shell, `ssh` is
+# its wrapper, which uses that client too).
+command -v ssh >/dev/null || die "no ssh in PATH"
+command -v ssh-keygen >/dev/null || die "no ssh-keygen in PATH"
 
 hosts=$(nix eval --json .#nixosConfigurations --apply builtins.attrNames) ||
   die "cannot evaluate nixosConfigurations of $PWD"
 jq -e --arg host "$host" 'index($host) != null' <<<"$hosts" >/dev/null ||
   die "no nixosConfigurations.$host; hosts: $(jq -r 'join(", ")' <<<"$hosts")"
 
-# Only these attributes are evaluated, so no assertions run and the public
-# key files, which do not exist yet, are not read. Any access to `config`
-# evaluates the conditions of all definitions, which reads the facter report
-# (possibly missing); an empty report replaces it here.
-facts=$(nix eval --json ".#nixosConfigurations.\"$host\"" --apply '
-  system:
-  let
-    inherit (system.extendModules {
-      modules = [ { hardware.facter.report = system.lib.mkForce { }; } ];
-    }) config;
-  in
-  {
-    address = config.backfabric.network.ipv4.address;
-    initrdHostKey = config.backfabric.access.initrdSsh.hostKey;
-    reportPath =
-      if config.hardware.facter.reportPath == null
-      then null
-      else toString config.hardware.facter.reportPath;
-  }')
+# fleet/facts.nix ($factsNix, set by fleet/install.nix) reads only the facts
+# needed here; it works without a facter report and without the public key
+# files. Passed as text: pure evaluation may not import it from its path.
+facts=$(nix eval --json ".#nixosConfigurations.\"$host\"" --apply "$(<"$factsNix")")
 address=$(jq -r .address <<<"$facts")
 initrdHostKey=$(jq -r .initrdHostKey <<<"$facts")
 reportPath=$(jq -r '.reportPath // empty' <<<"$facts")
