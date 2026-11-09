@@ -2,7 +2,6 @@
 # `nix flake check` evaluates the modules in a complete NixOS configuration.
 # Addresses are from the documentation ranges (RFC 5737, RFC 3849, RFC 7042).
 {
-  nixpkgs.hostPlatform = "x86_64-linux";
   networking.hostName = "example";
 
   # Fake disk ids; a real host takes them from `ls -l /dev/disk/by-id`.
@@ -26,12 +25,18 @@
     ];
     ssh.port = 2222;
     initrdSsh.port = 2223;
+    # Throwaway keys whose private parts were discarded. A real host reads the
+    # files that the install command writes next to its configuration.
+    hostKey.publicKey = builtins.readFile ./ssh_host_ed25519_key.pub;
+    initrdSsh.publicKey = builtins.readFile ./initrd_ssh_host_ed25519_key.pub;
   };
 
   # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,
   # with the report generated on the server by nixos-facter. This stub only
-  # names a network driver so that the initrd networking path is evaluated.
+  # names the platform (which, as on a real host, sets nixpkgs.hostPlatform)
+  # and a network driver, so that the initrd networking path is evaluated.
   hardware.facter.report = {
+    system = "x86_64-linux";
     hardware.network_controller = [ { driver_modules = [ "igb" ]; } ];
   };
 

@@ -7,8 +7,10 @@ SSH server on `backfabric.access.initrdSsh.port` that accepts the keys in
 
 ## Unlock after a reboot
 
+In the [fleet dev shell](fleet-shell.md):
+
 ```sh
-ssh -p <initrdSsh.port> root@<host>
+ssh <host>-initrd
 systemctl default
 ```
 
@@ -18,25 +20,17 @@ entered passphrase on the other disks as well, so answer any further prompt
 with the same passphrase. Alternatively, `systemd-tty-ask-password-agent`
 answers the pending prompts without waiting for the boot.
 
-Afterwards, log in to the booted system with `ssh -p <ssh.port> root@<host>`.
-The initrd and the booted system have different host keys; ssh keeps them
-apart because they listen on different ports.
+Afterwards, log in to the booted system with `ssh <host>`. The initrd and the
+booted system have different host keys; the fleet shell checks each against
+the generated known_hosts under its own alias (`HostKeyAlias`).
 
 ## The initrd host key
 
 The initrd and its SSH host key are stored unencrypted on the ESPs, so the key
 is not a secret and must differ from the host key of the booted system. It is
-generated once at install time and copied to the host with nixos-anywhere:
-
-```sh
-extra=$(mktemp -d)
-install -d -m 700 "$extra/etc/secrets/initrd"
-ssh-keygen -t ed25519 -N "" -C "" -f "$extra/etc/secrets/initrd/ssh_host_ed25519_key"
-nixos-anywhere --extra-files "$extra" ...   # plus the usual arguments
-```
-
-The path is `backfabric.access.initrdSsh.hostKey`. The key stays on the
+generated once at install time by the install command (see
+[fleet-shell.md](fleet-shell.md)) and copied to the host with nixos-anywhere
+`--extra-files` at `backfabric.access.initrdSsh.hostKey`. The key stays on the
 encrypted root file system: every boot loader installation reads it from there
-and appends it to the initrd, so it must not be deleted. Record the public key
-(`$extra/etc/secrets/initrd/ssh_host_ed25519_key.pub`) to verify the
-fingerprint on the first unlock.
+and appends it to the initrd, so it must not be deleted. Its public key is
+`backfabric.access.initrdSsh.publicKey`.

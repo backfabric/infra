@@ -11,7 +11,8 @@ the private repository and decrypted on the host by
   from the public key with `ssh-to-age`. No other key is used on the host.
 - The host key is generated before the install and copied to the host with
   nixos-anywhere `--extra-files`, so the first boot can already decrypt. The
-  install script (a later change) automates this. sshd uses the same key.
+  install command (see [fleet-shell.md](fleet-shell.md)) does this. sshd
+  uses the same key.
 - Admins decrypt and edit secrets with their own keys. Which kind of key
   (age, SSH, PGP, ...) is the private repository's choice; these modules
   only care about the host recipients.
@@ -40,20 +41,17 @@ creation_rules:
 
 ## Adding a host
 
-Derive the host's recipient from its public host key and add it to the
-`creation_rules` of every file the host needs:
+The install command prints the new host's recipient, waits until you have
+added it to the `creation_rules` of every file the host needs, and then
+re-encrypts the data keys of all sops-encrypted files (needs an admin key).
+By hand, the recipient comes from the public host key:
 
 ```sh
 ssh-to-age < ssh_host_ed25519_key.pub
-```
-
-Then re-encrypt the data keys of the affected files (needs an admin key):
-
-```sh
 sops updatekeys secrets.yaml
 ```
 
-Commit before installing or deploying the host.
+Commit before deploying the host.
 
 ## Rotating a host key
 
@@ -62,7 +60,9 @@ Commit before installing or deploying the host.
    with the old key.
 2. Install the new private key on the host at
    `/etc/ssh/ssh_host_ed25519_key` (mode `0600`) and the public key next to
-   it, then restart sshd. Update `known_hosts` on the admin machines.
+   it, then restart sshd. Replace the host's `ssh_host_ed25519_key.pub` in
+   the private repository, which updates `hostKey.publicKey` and with it the
+   known_hosts of the fleet dev shell.
 3. Remove the old recipient from `.sops.yaml`; `sops updatekeys`, deploy.
 
 If the old key may have leaked, also run `sops rotate -i <file>` to replace
