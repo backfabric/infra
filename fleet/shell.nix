@@ -69,11 +69,29 @@ let
   '';
 
   # Found first in PATH by every tool that runs `ssh`: nix (ssh:// and
-  # ssh-ng:// stores), nixos-rebuild, nixos-anywhere.
+  # ssh-ng:// stores), nixos-rebuild, nixos-anywhere. It only adds the
+  # generated config; the client is the operator machine's own: the next
+  # `ssh` in PATH after the wrapper's directory (e.g. Apple's on macOS, which
+  # understands its own options such as UseKeychain).
   ssh = pkgs.writeShellApplication {
     name = "ssh";
     text = ''
-      exec ${lib.getExe' pkgs.openssh "ssh"} -F ${sshConfig} "$@"
+      self=''${BASH_SOURCE[0]}
+      IFS=: read -r -a dirs <<<"$PATH"
+      start=0
+      for i in "''${!dirs[@]}"; do
+        if [[ ''${dirs[i]}/ssh -ef $self ]]; then
+          start=$((i + 1))
+          break
+        fi
+      done
+      for dir in "''${dirs[@]:start}"; do
+        if [[ -x $dir/ssh && ! $dir/ssh -ef $self ]]; then
+          exec "$dir/ssh" -F ${sshConfig} "$@"
+        fi
+      done
+      echo "ssh (fleet shell): no ssh client in PATH after the wrapper; install OpenSSH" >&2
+      exit 127
     '';
   };
 in
