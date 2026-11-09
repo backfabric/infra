@@ -10,8 +10,13 @@ with whatever the operator machine provides (default keys, agent, ...).
 
 ```nix
 {
-  inputs.backfabric.url = "github:backfabric/infra";
-  inputs.nixpkgs.follows = "backfabric/nixpkgs";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    backfabric = {
+      url = "github:backfabric/infra";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
     { self, nixpkgs, backfabric }:
@@ -54,11 +59,13 @@ written by the install command:
 
 `nix develop` provides:
 
-- `ssh`: runs the real ssh with `-F <generated config>`. Being first in
-  `PATH`, it is also used by `nix copy --to ssh-ng://<host>` (and `ssh://`),
-  by `nixos-rebuild` (`--target-host`, `--build-host`, via ssh and
-  `nix-copy-closure`), and by `nixos-anywhere` (whose own openssh comes last
-  in its `PATH`).
+- `ssh`: a wrapper that runs the operator machine's own ssh client (the next
+  `ssh` in `PATH` after the wrapper, e.g. `/usr/bin/ssh` on macOS) with
+  `-F <generated config>`. Being first in `PATH`, it is also used by
+  `nix copy --to ssh-ng://<host>` (and `ssh://`), by `nixos-rebuild`
+  (`--target-host`, `--build-host`, via ssh and `nix-copy-closure`), and by
+  `nixos-anywhere` (whose own openssh comes last in its `PATH`, after the
+  operator's).
 - `nixos-anywhere`, `nixos-rebuild` (nixos-rebuild-ng, also on macOS),
   `sops`, `ssh-to-age`, and `backfabric-install`.
 
@@ -76,7 +83,23 @@ are kept apart), a generated known_hosts file in the Nix store,
 fleet blocks come first, then `~/.ssh/config` and `/etc/ssh/ssh_config` are
 included for everything else (`-F` would otherwise skip both). For a fleet
 host, the user's configuration can still add options the fleet blocks do not
-set, such as `IdentityFile`.
+set.
+
+### Client keys
+
+The generated config sets no client key options. ssh uses the default keys
+(`~/.ssh/id_ed25519`, ...) and the keys of a running ssh-agent. For a key
+with another name, add the fleet aliases to your own `~/.ssh/config`:
+
+```
+Host node1 node1-initrd
+  IdentityFile ~/.ssh/id_fleet
+  # Optional: offer only this key, not the agent's other keys.
+  IdentitiesOnly yes
+```
+
+This applies because the generated config includes `~/.ssh/config` for every
+host and sets neither `IdentityFile` nor `IdentitiesOnly` itself.
 
 Examples:
 
@@ -114,8 +137,9 @@ nix run --inputs-from . backfabric#backfabric-install -- node1
 The command:
 
 1. Evaluates only the address, `backfabric.access.initrdSsh.hostKey`, and
-   `hardware.facter.reportPath` of `nixosConfigurations.node1`, with an empty
-   facter report, so a missing report or missing `.pub` files do not matter.
+   `hardware.facter.reportPath` of `nixosConfigurations.node1`
+   (`fleet/facts.nix`), so a missing report (and with it the platform, which a
+   real host takes from its report) or missing `.pub` files do not matter.
 2. Connects to the Rescue system (`root@<address>`, port 22) with a temporary
    known_hosts and `StrictHostKeyChecking accept-new`, and prints the host
    key fingerprints to compare with the ones the Hetzner Robot shows when
