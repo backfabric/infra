@@ -21,12 +21,14 @@
       # Subsystem modules registered in ./modules/default.nix.
       subsystems = import ./modules inputs;
 
-      formatterSystems = [
+      # Systems of the machines the operator works on.
+      systems = [
         "x86_64-linux"
         "aarch64-linux"
         "aarch64-darwin"
         "x86_64-darwin"
       ];
+      forAllSystems = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
       exampleSingleNode = lib.nixosSystem {
         modules = [
@@ -50,12 +52,28 @@
         };
       };
 
+      lib.mkFleetShell = import ./fleet/shell.nix;
+
+      # The install command on its own, for a host whose public keys do not
+      # exist yet (see docs/fleet-shell.md).
+      packages = forAllSystems (pkgs: {
+        backfabric-install = pkgs.callPackage ./fleet/install.nix { };
+      });
+
+      # Evaluated by `nix flake check --no-build`, like the checks.
+      devShells = forAllSystems (pkgs: {
+        example-fleet = self.lib.mkFleetShell {
+          inherit pkgs;
+          nixosConfigurations.example = exampleSingleNode;
+        };
+      });
+
       # Evaluated by `nix flake check --no-build`; never built in CI.
       checks.x86_64-linux = {
         example-single-node = exampleSingleNode.config.system.build.toplevel;
         example-single-disk = exampleSingleDisk.config.system.build.toplevel;
       };
 
-      formatter = lib.genAttrs formatterSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-tree);
+      formatter = forAllSystems (pkgs: pkgs.nixfmt-tree);
     };
 }

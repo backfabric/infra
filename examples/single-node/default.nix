@@ -26,6 +26,10 @@
     ];
     ssh.port = 2222;
     initrdSsh.port = 2223;
+    # Throwaway keys whose private parts were discarded. A real host reads the
+    # files that the install command writes next to its configuration.
+    hostKey.publicKey = builtins.readFile ./ssh_host_ed25519_key.pub;
+    initrdSsh.publicKey = builtins.readFile ./initrd_ssh_host_ed25519_key.pub;
   };
 
   # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,

@@ -5,9 +5,17 @@
 #     key, to unlock the LUKS disks after a reboot (see docs/initrd-unlock.md);
 #   - firewall (nftables backend): inbound closed except `ssh.port`, no ping
 #     replies. The initrd has no firewall.
+#
+# The public host keys are options so that the fleet dev shell (fleet/) can
+# generate a known_hosts file for every host.
 { config, lib, ... }:
 let
   cfg = config.backfabric.access;
+
+  # One ed25519 public key in OpenSSH format, as in a `.pub` file (the
+  # trailing newline of `builtins.readFile` is allowed). Rejects a private
+  # key passed by mistake, which would end up in the Nix store.
+  publicKeyType = lib.types.strMatching "ssh-ed25519 [A-Za-z0-9+/]+=*( [^\n]*)?\n?";
 in
 {
   options.backfabric.access = {
@@ -21,6 +29,16 @@ in
       type = lib.types.port;
       example = 2222;
       description = "Port of the SSH daemon of the booted system; the only port open in the firewall.";
+    };
+
+    hostKey.publicKey = lib.mkOption {
+      type = publicKeyType;
+      example = lib.literalExpression "builtins.readFile ./ssh_host_ed25519_key.pub";
+      description = ''
+        Public part of the SSH ed25519 host key of the booted system
+        (`/etc/ssh/ssh_host_ed25519_key`), written next to the host's
+        configuration by the install command.
+      '';
     };
 
     initrdSsh = {
@@ -42,6 +60,15 @@ in
           `--extra-files`. It is not a sops secret: it sits unencrypted in the
           initrd on the ESP, so it must not be the host key of the booted
           system.
+        '';
+      };
+
+      publicKey = lib.mkOption {
+        type = publicKeyType;
+        example = lib.literalExpression "builtins.readFile ./initrd_ssh_host_ed25519_key.pub";
+        description = ''
+          Public part of the initrd host key at `hostKey`, written next to
+          the host's configuration by the install command.
         '';
       };
     };

@@ -18,10 +18,17 @@ Status: work in progress.
   NixOS modules of the inputs its subsystem needs (e.g. disko for `disks`);
   consumers only import modules from this flake.
 - `nixosModules.default` imports every subsystem module.
+- `fleet/`: the fleet dev shell for the operator machine,
+  `lib.mkFleetShell { pkgs, nixosConfigurations }`, with a generated SSH
+  config and the install command `backfabric-install` (also
+  `packages.<system>.backfabric-install`), see
+  [docs/fleet-shell.md](docs/fleet-shell.md).
 - `examples/single-node/`: an example host with two disks, evaluated by
   `checks.x86_64-linux.example-single-node`, and with one disk by
-  `checks.x86_64-linux.example-single-disk`.
+  `checks.x86_64-linux.example-single-disk`; its fleet dev shell is
+  `devShells.<system>.example-fleet`.
 - `docs/`: operational runbooks:
+  [the fleet dev shell and installing a host](docs/fleet-shell.md),
   [replacing a failed disk](docs/disk-replacement.md),
   [unlocking the disks over SSH](docs/initrd-unlock.md),
   [managing secrets](docs/secrets.md).
@@ -33,26 +40,28 @@ Status: work in progress.
   (subvolumes `@` for `/`, `@nix` for `/nix`); GRUB mirrored to every disk
   for BIOS and UEFI boot. Set
   `backfabric.disks.devices` to the `/dev/disk/by-id/...` paths of the
-  system disks. When installing with nixos-anywhere, pass the LUKS passphrase
-  with `--disk-encryption-keys /tmp/disk-encryption.key <file>`.
+  system disks. The install command passes the LUKS passphrase to
+  nixos-anywhere with `--disk-encryption-keys /tmp/disk-encryption.key <file>`.
 - `network`: static IPv4 and IPv6 on the uplink, matched by MAC address,
   with systemd-networkd, in the booted system and in the initrd. Set
   `backfabric.network.macAddress`, `ipv4.address`, `ipv4.gateway`, and
   `ipv6.address` (with `/64`) from the Hetzner Robot; `ipv6.gateway`
   (`fe80::1`) and `nameservers` (Hetzner's resolvers) have defaults. The
   initrd network driver comes from nixos-facter: set
-  `hardware.facter.reportPath` to the host's report, generated on the server
-  with `nixos-facter > facter.json`. Evaluation fails without it.
+  `hardware.facter.reportPath` to the host's report (e.g. `./facter.json`),
+  which the install command generates if it is missing. Evaluation fails
+  without it.
 - `access`: root login with SSH keys only on `backfabric.access.ssh.port`,
   the only port open in the (nftables) firewall; no ping replies. The initrd
   runs an SSH server on `backfabric.access.initrdSsh.port` to unlock the
   disks, see [docs/initrd-unlock.md](docs/initrd-unlock.md). Set
-  `authorizedKeys` and both ports, and install the initrd host key at
-  `initrdSsh.hostKey` with nixos-anywhere `--extra-files`.
+  `authorizedKeys`, both ports, and the public host keys
+  `hostKey.publicKey` and `initrdSsh.publicKey` from the `.pub` files the
+  install command writes next to the facter report.
 - `secrets`: sops-nix, decrypting with the SSH ed25519 host key
   (`/etc/ssh/ssh_host_ed25519_key`) only; no options of its own. Set
   `sops.defaultSopsFile` to the encrypted file; other subsystems declare
-  their own `sops.secrets.*`. Install the host key with
+  their own `sops.secrets.*`. The install command copies the host key with
   nixos-anywhere `--extra-files` so the first boot can decrypt, see
   [docs/secrets.md](docs/secrets.md).
 
