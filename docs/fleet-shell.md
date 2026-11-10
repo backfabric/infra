@@ -355,3 +355,13 @@ Nothing rolls back automatically yet: if a change breaks networking or SSH,
 recover from the Hetzner Rescue system. `backfabric deploy node1 test`
 activates without making the new generation the boot default, so a reboot
 returns to the previous one.
+
+Interface names are set by udev when a device appears (in the initrd, for
+the uplink), never for an interface that is up. A change that renames an
+interface, like the one that named the uplink `uplink`, therefore only
+takes effect after a reboot, and the firewall opens SSH only on `uplink`:
+with `switch` or `test` before that reboot, new SSH connections are
+refused (established ones survive). Deploy such a change with `boot`,
+then reboot and unlock. If SSH was lost after `test` or `switch`, reboot
+(reset in the Robot): after `test` the previous generation boots, after
+`switch` the new one, which sets the name in the initrd.

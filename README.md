@@ -68,7 +68,9 @@ nix flake init -t github:backfabric/infra
   LUKS passphrase from `backfabric keygen` to nixos-anywhere with
   `--disk-encryption-keys /tmp/disk-encryption.key <file>`.
 - `network`: static IPv4 on the uplink, matched by MAC address, with
-  systemd-networkd, in the booted system and in the initrd; IPv6 is
+  systemd-networkd, in the booted system and in the initrd; the uplink is
+  renamed `uplink` (a .link unit matched by the MAC, effective from the next
+  boot); IPv6 is
   disabled. Set `backfabric.network.macAddress`, `ipv4.address`, and
   `ipv4.gateway` from the Hetzner Robot; `nameservers` (Hetzner's IPv4
   resolvers) has a default. The
@@ -79,8 +81,8 @@ nix flake init -t github:backfabric/infra
   so `backfabric probe` and `install` check on the server that the MAC
   exists and its driver is in the initrd.
 - `access`: root login with SSH keys only on `backfabric.access.ssh.port`,
-  the only port open from outside in the (nftables) firewall; no ping
-  replies. The initrd
+  the only port open from outside in the (nftables) firewall, and only on
+  the interface `uplink` (pods cannot reach it); no ping replies. The initrd
   runs an SSH server on `backfabric.access.initrdSsh.port` to unlock the
   disks, see [docs/initrd-unlock.md](docs/initrd-unlock.md). Set
   `authorizedKeys`, both ports, and the public host keys

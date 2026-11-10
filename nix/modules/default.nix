@@ -16,7 +16,14 @@ inputs: {
     ];
   };
   network = ./network.nix;
-  access = ./access.nix;
+  # With network.nix, which names the uplink interface its firewall rule
+  # refers to; the same paths in other entries are imported once.
+  access = {
+    imports = [
+      ./network.nix
+      ./access.nix
+    ];
+  };
   secrets = {
     imports = [
       inputs.sops-nix.nixosModules.sops
@@ -24,8 +31,7 @@ inputs: {
     ];
   };
   # Also imports the subsystems it reads options of (the node address, the
-  # cluster-wide sops file); the same paths in other entries are imported
-  # once.
+  # cluster-wide sops file).
   k3s = {
     imports = [
       inputs.sops-nix.nixosModules.sops
