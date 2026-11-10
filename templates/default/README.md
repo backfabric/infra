@@ -205,19 +205,12 @@ Commit the change, then in the dev shell (the host builds its own
 system; the operator machine only evaluates):
 
 ```sh
-nixos-rebuild switch --flake .#node1 --target-host node1 --build-host node1 \
-  --no-reexec --use-substitutes
+backfabric deploy node1          # switch; also: boot, test
 ```
 
-- `--build-host node1`: the derivations are copied to the host and built
-  there; nothing is built locally, so this works from macOS.
-- `--no-reexec`: for `switch`, `boot`, and `test`, nixos-rebuild first builds
-  the new configuration's own nixos-rebuild locally and re-executes it. From
-  another platform that is an x86_64-linux build on the operator machine: it
-  fails unless the package happens to be in the binary cache.
-- `--use-substitutes`: the host fetches what it can from the binary cache
-  instead of receiving it from the operator machine.
-- Nothing rolls back automatically yet: if a change breaks networking or
-  SSH, recover from the Hetzner Rescue system.
+Nothing rolls back automatically yet: if a change breaks networking or SSH,
+recover from the Hetzner Rescue system. See
+[updating a host](https://github.com/backfabric/infra/blob/main/docs/fleet-shell.md#updating-a-host)
+for what the command runs.
 
 Update the inputs with `nix flake update`.
