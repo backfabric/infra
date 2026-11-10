@@ -1,5 +1,6 @@
 # k3s server with embedded etcd: the first server of the cluster
-# (ADR 0006), on an IPv4-only flannel network (ADR 0007).
+# (ADR 0006), on an IPv4-only flannel network (ADR 0007), with the hardening
+# defaults of ADR 0017.
 #
 #   - `clusterInit`: etcd instead of SQLite, so that more servers can join
 #     later without a datastore migration;
@@ -9,15 +10,23 @@
 #     with the token of the cluster that took it;
 #   - packaged components that the cluster does not use are disabled
 #     (traefik, servicelb, metrics-server, local-storage); CoreDNS and the
-#     embedded NetworkPolicy controller (kube-router) stay;
+#     embedded NetworkPolicy controller (kube-router) stay; their images come
+#     from the package's airgap archive, not from a registry;
 #   - Secrets are encrypted at rest in etcd with the `secretbox` provider;
 #   - etcd snapshots with k3s's defaults: every 12 hours, the last 5, in
 #     /var/lib/rancher/k3s/server/db/snapshots;
-#   - the Kubernetes API is not reachable from outside: no port is opened on
-#     the uplink. `kubectl` runs on the host as root, with the kubeconfig k3s
-#     writes to /etc/rancher/k3s/k3s.yaml.
+#   - nothing of the cluster is reachable from outside: no port is opened on
+#     the uplink, NodePorts only answer on 127.0.0.0/8, Services cannot set
+#     externalIPs, and Pod Security Admission (baseline) rejects hostPort
+#     and hostNetwork pods outside kube-system. `kubectl` runs on the host as
+#     root, with the kubeconfig k3s writes to /etc/rancher/k3s/k3s.yaml;
+#   - every API request is audited at level Metadata (no bodies) to
+#     /var/log/kubernetes/audit.log.
 #
-# Joining further servers or agents is not implemented yet.
+# Joining further servers or agents is not implemented yet. Before the first
+# agent joins, the server token moves from `secrets/common.yaml` (readable by
+# every host) to a file only the servers can read, and agents get their own
+# agent token (ADR 0017).
 {
   config,
   lib,
@@ -26,6 +35,55 @@
 }:
 let
   cfg = config.backfabric.k3s;
+
+  # Pod Security Admission for every namespace without its own
+  # `pod-security.kubernetes.io/*` labels: enforce baseline (no privileged,
+  # hostNetwork, hostPID, hostPath, or hostPort pods), audit and warn about
+  # what restricted would reject. kube-system is exempt: k3s's own
+  # components (CoreDNS, the Helm controller's jobs) run there.
+  admissionConfig = builtins.toFile "k3s-admission-config.json" (
+    builtins.toJSON {
+      apiVersion = "apiserver.config.k8s.io/v1";
+      kind = "AdmissionConfiguration";
+      plugins = [
+        {
+          name = "PodSecurity";
+          configuration = {
+            apiVersion = "pod-security.admission.config.k8s.io/v1";
+            kind = "PodSecurityConfiguration";
+            defaults = {
+              enforce = "baseline";
+              enforce-version = "latest";
+              audit = "restricted";
+              audit-version = "latest";
+              warn = "restricted";
+              warn-version = "latest";
+            };
+            exemptions = {
+              usernames = [ ];
+              runtimeClasses = [ ];
+              namespaces = [ "kube-system" ];
+            };
+          };
+        }
+      ];
+    }
+  );
+
+  # Every request, at level Metadata: who did what to which object, without
+  # request or response bodies, so that Secret values never reach the log.
+  # RequestReceived is omitted: ResponseComplete (or Panic) records the same
+  # request with its result.
+  auditPolicy = builtins.toFile "k3s-audit-policy.json" (
+    builtins.toJSON {
+      apiVersion = "audit.k8s.io/v1";
+      kind = "Policy";
+      omitStages = [ "RequestReceived" ];
+      rules = [ { level = "Metadata"; } ];
+    }
+  );
+
+  auditLogDir = "/var/log/kubernetes";
 in
 {
   options.backfabric.k3s = {
@@ -66,6 +124,11 @@ in
         "metrics-server"
         "local-storage"
       ];
+      # The images of the k3s release for the host's platform (CoreDNS,
+      # pause, the Helm controller's job, ...), linked into
+      # /var/lib/rancher/k3s/agent/images before k3s starts, which imports
+      # them into containerd: the system pods need no registry.
+      images = [ cfg.package.airgap-images ];
       extraFlags = [
         # k3s's defaults, set explicitly: they cannot be changed without
         # rebuilding the cluster (ADR 0007).
@@ -73,14 +136,44 @@ in
         "--service-cidr=10.43.0.0/16"
         "--secrets-encryption"
         "--secrets-encryption-provider=secretbox"
+
+        # kube-proxy (iptables mode) DNATs NodePorts in PREROUTING to pod
+        # IPs, so the traffic is forwarded and never meets the host's input
+        # firewall. Only loopback addresses accept NodePorts.
+        "--kube-proxy-arg=nodeport-addresses=127.0.0.0/8"
+
+        # `+=` appends to k3s's own value (NodeRestriction) instead of
+        # replacing it. DenyServiceExternalIPs rejects Services with
+        # externalIPs, which kube-proxy would DNAT like a NodePort.
+        "--kube-apiserver-arg=enable-admission-plugins+=DenyServiceExternalIPs"
+        "--kube-apiserver-arg=admission-control-config-file=${admissionConfig}"
+
+        # The audit log goes to a file, not to k3s's stdout (`-`): there it
+        # would be mixed with the k3s log and subject to journald's rate
+        # limit, which drops messages. The API server rotates it itself: at
+        # 100 MB, keeping 30 gzipped files for at most 90 days.
+        "--kube-apiserver-arg=audit-policy-file=${auditPolicy}"
+        "--kube-apiserver-arg=audit-log-path=${auditLogDir}/audit.log"
+        "--kube-apiserver-arg=audit-log-maxsize=100"
+        "--kube-apiserver-arg=audit-log-maxbackup=30"
+        "--kube-apiserver-arg=audit-log-maxage=90"
+        "--kube-apiserver-arg=audit-log-compress=true"
       ];
+    };
+
+    # The API server creates the log file with mode 0600.
+    systemd.tmpfiles.settings."10-backfabric-k3s".${auditLogDir}.d = {
+      mode = "0700";
+      user = "root";
+      group = "root";
     };
 
     # Pods reach the API server through the `kubernetes` service, which
     # kube-proxy translates to this node's address, port 6443; the packets
     # arrive from the flannel bridge cni0 and pass the host's input chain.
     # Only this port, and only from cni0: everything else pods send to the
-    # host stays dropped, and the uplink stays closed.
+    # host stays dropped (SSH is only open on the uplink, see access.nix),
+    # and the uplink stays closed.
     networking.firewall.interfaces.cni0.allowedTCPPorts = [ 6443 ];
   };
 }

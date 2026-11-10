@@ -102,15 +102,20 @@ nix flake init -t github:backfabric/infra
   change it, an etcd snapshot is only restored with its cluster's token).
   IPv4-only on k3s's default CIDRs (pods 10.42.0.0/16, services
   10.43.0.0/16), flannel (vxlan) and the embedded NetworkPolicy controller;
-  traefik, servicelb, metrics-server, and local-storage disabled; Secrets
-  encrypted at rest with `secretbox`; etcd snapshots with k3s's defaults
-  (every 12 hours, the last 5, in
-  `/var/lib/rancher/k3s/server/db/snapshots`). The Kubernetes API is not
-  reachable from outside: the firewall opens port 6443 only on `cni0`, for
-  pods. Run `kubectl` on the host as root (`ssh <host>`, then `kubectl get
-  nodes`). `backfabric.k3s.package` (default `pkgs.k3s_1_35`) pins the k3s
-  minor version: upgrade one minor version at a time. Joining more nodes is
-  not implemented yet.
+  traefik, servicelb, metrics-server, and local-storage disabled, the other
+  system images from the package's airgap archive; Secrets encrypted at
+  rest with `secretbox`; etcd snapshots with k3s's defaults (every 12 hours,
+  the last 5, in `/var/lib/rancher/k3s/server/db/snapshots`). Nothing in
+  the cluster is reachable from outside: the firewall opens port 6443 only
+  on `cni0`, for pods; NodePorts answer only on 127.0.0.0/8; Services with
+  externalIPs are rejected; Pod Security Admission enforces `baseline`
+  (audit and warn `restricted`) outside kube-system. Every API request is
+  audited at level Metadata to `/var/log/kubernetes/audit.log`. See
+  [ADR 0017](docs/adr/0017-cluster-hardening-defaults.md). Run `kubectl` on
+  the host as root (`ssh <host>`, then `kubectl get nodes`).
+  `backfabric.k3s.package` (default `pkgs.k3s_1_35`) pins the k3s minor
+  version: upgrade one minor version at a time. Joining more nodes is not
+  implemented yet.
 
 ## Checks
 

@@ -197,12 +197,30 @@ host for now. The cluster token, `k3s-token` in `secrets/common.yaml`
 `flake.nix`), must never change: an etcd snapshot can only be restored
 with it. Keep it with the rest of this repository.
 
-The Kubernetes API is not reachable from outside. Use `kubectl` on the host:
+Nothing in the cluster is reachable from outside: the Kubernetes API is
+not exposed, NodePorts only answer on the host's loopback addresses
+(`curl 127.0.0.1:<nodePort>` on the host), and Services with `externalIPs`
+are rejected. Pod Security Admission enforces `baseline` in every namespace
+except kube-system (no privileged, hostNetwork, hostPath, or hostPort
+pods) and warns about what `restricted` would reject; a namespace can
+tighten this with its own `pod-security.kubernetes.io/*` labels. See
+[ADR 0017](https://github.com/backfabric/infra/blob/main/docs/adr/0017-cluster-hardening-defaults.md).
+
+Use `kubectl` on the host:
 
 ```sh
 ssh node1
 kubectl get nodes
 kubectl get pods -A
+```
+
+Every API request is recorded (who, what, which object, the result; no
+request or response bodies) in `/var/log/kubernetes/audit.log` on the
+host, one JSON object per line, rotated at 100 MB (30 gzipped files, at
+most 90 days):
+
+```sh
+ssh node1 tail -f /var/log/kubernetes/audit.log
 ```
 
 The k3s version is pinned to a minor release
