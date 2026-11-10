@@ -1,6 +1,6 @@
 # Registry of subsystem modules.
 #
-# Each subsystem lives in its own file, `modules/<subsystem>.nix`, declares its
+# Each subsystem lives in its own file, `nix/modules/<subsystem>.nix`, declares its
 # options under `backfabric.<subsystem>`, and is registered here. The flake
 # exports every entry as `nixosModules.<subsystem>`, and
 # `nixosModules.default` imports all of them.

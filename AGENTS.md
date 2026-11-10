@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Public NixOS flake: modules for an encrypted k3s cluster on Hetzner bare
-metal, plus the operator tooling (`fleet/`) and the template of the private
+metal, plus the operator tooling (`nix/fleet/`) and the template of the private
 repository that consumes them. Layout and subsystems: [README.md](README.md).
 
 Architectural decisions and their reasons: [docs/adr/](docs/adr/). Read the
@@ -42,10 +42,12 @@ in the same PR.
 - Prefer upstream NixOS options and established tools over own code; add an
   option only when a consumer needs it.
 - A module or command exists only with real behaviour.
-- Subsystem layout contract: `modules/<subsystem>.nix`, options under
-  `backfabric.<subsystem>`, registered explicitly in `modules/default.nix`.
+- All Nix code goes under `nix/`; only `flake.nix` and `flake.lock` sit at the
+  root. Other parts of the project get their own top-level directories.
+- Subsystem layout contract: `nix/modules/<subsystem>.nix`, options under
+  `backfabric.<subsystem>`, registered explicitly in `nix/modules/default.nix`.
 - Operator commands are subcommands of `backfabric` in bash under
-  `fleet/cli/` (one file per subcommand, shared helpers in `lib.sh`, built as
+  `nix/fleet/cli/` (one file per subcommand, shared helpers in `lib.sh`, built as
   one `writeShellApplication`, so shellcheck runs at build time). Each
   subcommand does one thing, can be re-run after a failure, and prints the
   next step.
@@ -63,4 +65,4 @@ in the same PR.
   steps to run there: the commit to pin, the commands, and what each should
   show.
 - When user-facing behaviour changes, update the matching runbook in `docs/`,
-  the README, and `templates/default/README.md`.
+  the README, and `nix/templates/default/README.md`.

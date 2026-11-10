@@ -1,4 +1,4 @@
-# Helpers shared by the subcommands of backfabric, see fleet/cli/default.nix.
+# Helpers shared by the subcommands of backfabric, see nix/fleet/cli/default.nix.
 # Run by writeShellApplication (bash, errexit, nounset, pipefail).
 
 # The command in messages, e.g. "backfabric install"; set by each subcommand.
@@ -31,7 +31,7 @@ require_host() {
 }
 
 # host_facts <host> <attribute>...: prints the given attributes of
-# fleet/facts.nix ($factsNix) for nixosConfigurations.<host> as a JSON object.
+# nix/fleet/facts.nix ($factsNix) for nixosConfigurations.<host> as a JSON object.
 # The facts work without a facter report; hostPublicKey needs the host's
 # public key file. Passed as text: pure evaluation may not import it from its
 # path.

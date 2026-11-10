@@ -143,7 +143,7 @@ A host's key changes only when it is reinstalled; re-enter the shell after
 committing the new `.pub` files.
 
 The shell reads only a few options of each host (address, ports, public
-keys; `fleet/facts.nix`), without the module system's full checks, so it
+keys; `nix/fleet/facts.nix`), without the module system's full checks, so it
 evaluates as soon as every host has its two `.pub` files, even before the
 host's facter report exists.
 
@@ -225,7 +225,7 @@ the host's `.pub` files exist.
 ### keygen
 
 Evaluates only `backfabric.access.initrdSsh.hostKey` and
-`hardware.facter.reportPath` of the host (`fleet/facts.nix`; the report and
+`hardware.facter.reportPath` of the host (`nix/fleet/facts.nix`; the report and
 the `.pub` files may be missing), generates both ed25519 keys and the
 passphrase into the state directory, and writes `ssh_host_ed25519_key.pub`
 and `initrd_ssh_host_ed25519_key.pub` into the directory of the facter

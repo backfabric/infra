@@ -11,28 +11,32 @@ Status: work in progress.
 
 ## Layout
 
-- `modules/<subsystem>.nix`: one NixOS module per subsystem, with options
+All Nix code lives under `nix/`, so that other parts of the project can sit
+beside it later. Only `flake.nix` and `flake.lock` stay at the root: Nix
+requires them there for the flake to be `github:backfabric/infra`.
+
+- `nix/modules/<subsystem>.nix`: one NixOS module per subsystem, with options
   under `backfabric.<subsystem>`. Each subsystem is registered in
-  `modules/default.nix` and exported as `nixosModules.<subsystem>`. The
+  `nix/modules/default.nix` and exported as `nixosModules.<subsystem>`. The
   registry is a function of the flake inputs, so an entry also imports the
   NixOS modules of the inputs its subsystem needs (e.g. disko for `disks`);
   consumers only import modules from this flake.
 - `nixosModules.default` imports every subsystem module.
-- `fleet/`: the fleet dev shell for the operator machine,
+- `nix/fleet/`: the fleet dev shell for the operator machine,
   `lib.mkFleetShell { pkgs, nixosConfigurations }`, with a generated SSH
-  config and the operator command `backfabric` (`fleet/cli/`; subcommands
+  config and the operator command `backfabric` (`nix/fleet/cli/`; subcommands
   `sops init`, `keygen`, `sops add-host`, `probe`, `install`, `unlock`,
   `finalize`, `deploy`; also `packages.<system>.backfabric`, the default package), see
   [docs/fleet-shell.md](docs/fleet-shell.md) and
   [docs/secrets.md](docs/secrets.md).
-- `examples/single-node/`: an example host with two disks and an excerpt of
+- `nix/examples/single-node/`: an example host with two disks and an excerpt of
   a facter report, evaluated by `checks.x86_64-linux.example-single-node`,
   and with one disk by `checks.x86_64-linux.example-single-disk`; its fleet
   dev shell is `devShells.<system>.example-fleet`. The `assertions-*` checks
   evaluate the assertions that compare a configuration with its facter
   report: none fails for the example, and a report without a network driver
   or without a configured disk fails the expected one.
-- `templates/default/`: the skeleton of the private repository, see below;
+- `nix/templates/default/`: the skeleton of the private repository, see below;
   evaluated by `checks.x86_64-linux.template-empty` and
   `checks.x86_64-linux.template-with-host`.
 - `docs/`: operational runbooks:

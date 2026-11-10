@@ -112,7 +112,7 @@ backfabric sops add-host node1
 run from the root of the private repository:
 
 1. Evaluates `backfabric.access.hostKey.publicKey` of
-   `nixosConfigurations.node1` (`fleet/facts.nix`; a missing facter report
+   `nixosConfigurations.node1` (`nix/fleet/facts.nix`; a missing facter report
    does not matter, the `.pub` file must exist) and converts it with
    `ssh-to-age`.
 2. Adds the key `&host_node1`, a rule for `secrets/node1.yaml` with every
