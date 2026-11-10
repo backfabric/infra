@@ -136,8 +136,7 @@ Examples:
 ssh node1                     # booted system
 ssh node1-initrd              # initrd, to unlock the disks
 nix copy --to ssh-ng://node1 /nix/store/...
-# macOS cannot build the x86_64-linux system: build on the host itself.
-nixos-rebuild switch --flake .#node1 --target-host node1 --build-host node1
+backfabric deploy node1      # apply the committed configuration, see below
 ```
 
 A host's key changes only when it is reinstalled; re-enter the shell after
@@ -164,6 +163,9 @@ host need them (`backfabric help`):
 - `backfabric unlock <host>`: sends the LUKS passphrase to the initrd.
 - `backfabric finalize <host>`: checks the installed host and deletes its
   local secrets.
+- `backfabric deploy <host> [switch | boot | test]`: applies the committed
+  configuration to an installed host (default `switch`); see
+  [updating a host](#updating-a-host).
 - `backfabric help [<command>]`: shows this list, or the help of a command
   (e.g. `backfabric help sops add-host`). Every command also takes `-h` and
   `--help`.
@@ -302,3 +304,33 @@ commit.
 To reinstall a host, delete its `.pub` files first: `keygen` refuses to
 overwrite them. After the install, the host waits for the passphrase on every
 boot; see [initrd-unlock.md](initrd-unlock.md).
+
+## Updating a host
+
+Commit the change, then in the dev shell:
+
+```sh
+backfabric deploy node1          # switch; also: boot, test
+```
+
+It refuses if tracked files have uncommitted changes (the flake would
+deploy the working tree, not a commit), then runs
+
+```sh
+nixos-rebuild <action> --flake .#node1 --target-host node1 --build-host node1 \
+  --no-reexec --use-substitutes
+```
+
+- `--build-host`: the operator machine only evaluates; the derivations are
+  copied to the host and built there, so this works from macOS.
+- `--no-reexec`: for `switch`, `boot`, and `test`, nixos-rebuild otherwise
+  first builds the new configuration's own nixos-rebuild locally and
+  re-executes it; from macOS that is an x86_64-linux build, which fails
+  unless the package happens to be in the binary cache.
+- `--use-substitutes`: the host fetches what it can from the binary cache
+  instead of receiving it from the operator machine.
+
+Nothing rolls back automatically yet: if a change breaks networking or SSH,
+recover from the Hetzner Rescue system. `backfabric deploy node1 test`
+activates without making the new generation the boot default, so a reboot
+returns to the previous one.

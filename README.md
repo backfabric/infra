@@ -22,7 +22,7 @@ Status: work in progress.
   `lib.mkFleetShell { pkgs, nixosConfigurations }`, with a generated SSH
   config and the operator command `backfabric` (`fleet/cli/`; subcommands
   `sops init`, `keygen`, `sops add-host`, `probe`, `install`, `unlock`,
-  `finalize`; also `packages.<system>.backfabric`, the default package), see
+  `finalize`, `deploy`; also `packages.<system>.backfabric`, the default package), see
   [docs/fleet-shell.md](docs/fleet-shell.md) and
   [docs/secrets.md](docs/secrets.md).
 - `examples/single-node/`: an example host with two disks and an excerpt of

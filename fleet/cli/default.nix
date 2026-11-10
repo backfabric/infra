@@ -11,6 +11,7 @@
   gitMinimal,
   jq,
   nixos-anywhere,
+  nixos-rebuild,
   sops,
   ssh-to-age,
   yq-go,
@@ -25,6 +26,7 @@ writeShellApplication {
     gitMinimal
     jq
     nixos-anywhere
+    nixos-rebuild
     sops
     ssh-to-age
     yq-go
@@ -41,6 +43,7 @@ writeShellApplication {
     ./install.sh
     ./unlock.sh
     ./finalize.sh
+    ./deploy.sh
     ./backfabric.sh
   ];
 }

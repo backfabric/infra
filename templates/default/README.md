@@ -202,10 +202,15 @@ See [unlocking the disks](https://github.com/backfabric/infra/blob/main/docs/ini
 ## Update a host
 
 Commit the change, then in the dev shell (the host builds its own
-system):
+system; the operator machine only evaluates):
 
 ```sh
-nixos-rebuild switch --flake .#node1 --target-host node1 --build-host node1
+backfabric deploy node1          # switch; also: boot, test
 ```
+
+Nothing rolls back automatically yet: if a change breaks networking or SSH,
+recover from the Hetzner Rescue system. See
+[updating a host](https://github.com/backfabric/infra/blob/main/docs/fleet-shell.md#updating-a-host)
+for what the command runs.
 
 Update the inputs with `nix flake update`.
