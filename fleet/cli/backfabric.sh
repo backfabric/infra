@@ -5,10 +5,15 @@ usage() {
   cat <<'EOF'
 Usage: backfabric <command> [<argument>...]
 
-Commands for the hosts of the private repository, run from its root:
+Commands for the hosts of the private repository, run from its root, in the
+order of a host's installation:
   sops init       Create .sops.yaml with the admin keys, once
-  install         Install a host from the Hetzner Rescue system
+  keygen          Generate a host's keys and LUKS passphrase, locally
   sops add-host   Add a host to .sops.yaml and re-encrypt its files
+  probe           Boot the server into the installer, get its hardware report
+  install         Install a host on the server (erases its disks)
+  unlock          Send the LUKS passphrase to a host's initrd (every boot)
+  finalize        Check the installed host and delete its local secrets
   help            Show this help, or the help of a command
 
 Run `backfabric help <command>` or `backfabric <command> --help` for the
@@ -26,7 +31,7 @@ cmd_help() {
   "" | -h | --help | help)
     usage
     ;;
-  install | "sops init" | "sops add-host")
+  "sops init" | keygen | "sops add-host" | probe | install | unlock | finalize)
     main "$@" --help
     ;;
   *)
@@ -37,9 +42,10 @@ cmd_help() {
 
 main() {
   case "${1-}" in
-  install)
+  keygen | probe | install | unlock | finalize)
+    command=$1
     shift
-    cmd_install "$@"
+    "cmd_$command" "$@"
     ;;
   sops)
     case "${2-}" in

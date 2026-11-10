@@ -8,40 +8,32 @@
 let
   inherit (pkgs) lib;
 
+  # The facts (./facts.nix) work before the host's facter report exists, so
+  # the shell evaluates as soon as every host has its `.pub` files.
+  facts = lib.mapAttrs (_: import ./facts.nix) nixosConfigurations;
+
   # SSH options per alias. Port knocking (Stage 4) adds a `ProxyCommand` to
   # the alias of the booted system.
-  aliases = lib.concatMapAttrs (
-    host: system:
-    let
-      inherit (system.config.backfabric) access network;
-    in
-    {
-      ${host} = {
-        HostName = network.ipv4.address;
-        Port = access.ssh.port;
-        HostKeyAlias = host;
-      };
-      "${host}-initrd" = {
-        HostName = network.ipv4.address;
-        Port = access.initrdSsh.port;
-        HostKeyAlias = "${host}-initrd";
-      };
-    }
-  ) nixosConfigurations;
+  aliases = lib.concatMapAttrs (host: host': {
+    ${host} = {
+      HostName = host'.address;
+      Port = host'.sshPort;
+      HostKeyAlias = host;
+    };
+    "${host}-initrd" = {
+      HostName = host'.address;
+      Port = host'.initrdPort;
+      HostKeyAlias = "${host}-initrd";
+    };
+  }) facts;
 
   # With `HostKeyAlias`, ssh looks up the alias instead of `[address]:port`.
   knownHosts = pkgs.writeText "fleet-known-hosts" (
     lib.concatStrings (
-      lib.mapAttrsToList (
-        host: system:
-        let
-          inherit (system.config.backfabric) access;
-        in
-        ''
-          ${host} ${lib.trim access.hostKey.publicKey}
-          ${host}-initrd ${lib.trim access.initrdSsh.publicKey}
-        ''
-      ) nixosConfigurations
+      lib.mapAttrsToList (host: host': ''
+        ${host} ${lib.trim host'.hostPublicKey}
+        ${host}-initrd ${lib.trim host'.initrdPublicKey}
+      '') facts
     )
   );
 
@@ -104,4 +96,10 @@ pkgs.mkShellNoCC {
     pkgs.ssh-to-age
     (pkgs.callPackage ./cli { })
   ];
+  # Tells `backfabric unlock` and `finalize` that `ssh` knows the hosts. A
+  # shell hook, unlike an attribute, also reaches a shell that includes this
+  # one with `inputsFrom`.
+  shellHook = ''
+    export BACKFABRIC_FLEET_SHELL=1
+  '';
 }
