@@ -2,16 +2,8 @@
 # in the systemd initrd (so that the disks can be unlocked over SSH).
 #
 # One systemd-networkd unit matches the uplink by MAC address, because
-# predictable interface names depend on the systemd version, and a .link unit
-# matched by the same MAC names it `uplink`, which the firewall refers to
-# (access.nix opens SSH only there). udev applies the .link unit when the
-# device appears; upstream copies the .link units into the systemd initrd,
-# so the name is set in the initrd already and kept after switch-root (a
-# running system does not rename an interface that is up: the name changes
-# with the next boot).
-#
-# The IPv4 address is configured as /32 with the gateway as peer, as Hetzner
-# documents for
+# predictable interface names depend on the systemd version. The IPv4 address
+# is configured as /32 with the gateway as peer, as Hetzner documents for
 # dedicated servers: the main IPv4 comes from a larger subnet, but the server
 # may only talk to its gateway.
 #
@@ -100,10 +92,6 @@ in
     networking.useNetworkd = true;
     networking.useDHCP = false;
     networking.enableIPv6 = false;
-    systemd.network.links."10-uplink" = {
-      matchConfig.MACAddress = cfg.macAddress;
-      linkConfig.Name = "uplink";
-    };
     systemd.network.networks."10-uplink" = uplink;
 
     # With a report, facter enables DHCP on every detected interface.

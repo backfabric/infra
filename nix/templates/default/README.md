@@ -260,9 +260,7 @@ backfabric deploy node1          # switch; also: boot, test
 ```
 
 Nothing rolls back automatically yet: if a change breaks networking or SSH,
-recover from the Hetzner Rescue system. A changed interface name (the
-uplink is called `uplink`) only takes effect at the next boot: deploy such
-a change with `boot` and reboot. See
+recover from the Hetzner Rescue system. See
 [updating a host](https://github.com/backfabric/infra/blob/main/docs/fleet-shell.md#updating-a-host)
 for what the command runs.
 

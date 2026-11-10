@@ -3,10 +3,9 @@
 #   - sshd: root login with SSH keys only, on `ssh.port`;
 #   - initrd: sshd on `initrdSsh.port` with the same keys and a separate host
 #     key, to unlock the LUKS disks after a reboot (see docs/initrd-unlock.md);
-#   - firewall (nftables backend): inbound closed except `ssh.port` on the
-#     uplink (the interface network.nix names `uplink`), so pods cannot reach
-#     sshd through the host's other interfaces; k3s opens its API port to
-#     pods only, on `cni0`. No ping replies. The initrd has no firewall.
+#   - firewall (nftables backend): inbound closed from outside except
+#     `ssh.port` (k3s opens its API port to pods only, on `cni0`), no ping
+#     replies. The initrd has no firewall.
 #
 # The public host keys are options so that the fleet dev shell (nix/fleet/) can
 # generate a known_hosts file for every host.
@@ -82,10 +81,9 @@ in
     services.openssh = {
       enable = true;
       ports = [ cfg.ssh.port ];
-      # Not on every interface: pods reach the host through cni0, and only
-      # the uplink needs SSH. Port knocking (Stage 4) will replace this with
-      # a rule that opens it only for the knocking source address.
-      openFirewall = false;
+      # Opens `ssh.port` in the firewall; port knocking (Stage 4) replaces this
+      # with a rule that opens it only for the knocking source address.
+      openFirewall = true;
       settings = {
         PasswordAuthentication = false;
         KbdInteractiveAuthentication = false;
@@ -112,9 +110,6 @@ in
     networking.firewall = {
       enable = true;
       allowPing = false;
-      # `uplink`: the name network.nix gives the interface with
-      # `backfabric.network.macAddress`.
-      interfaces.uplink.allowedTCPPorts = [ cfg.ssh.port ];
     };
   };
 }
