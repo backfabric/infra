@@ -16,8 +16,10 @@ secrets.
   Hetzner Robot for the Rescue system. The dev shell uses your default keys
   and ssh-agent, see
   [client keys](https://github.com/backfabric/infra/blob/main/docs/fleet-shell.md#client-keys).
-- An admin key for sops, of any kind sops supports (age, PGP, ...), stored
-  where you like. For example an age key:
+- An admin key for sops: an age key or a PGP key, stored where you like
+  (an SSH ed25519 key works through ssh-to-age, see
+  [admin keys](https://github.com/backfabric/infra/blob/main/docs/secrets.md#admin-keys)).
+  For example an age key:
   `nix shell nixpkgs#age -c age-keygen -o ~/.config/sops/age/fleet.txt`.
   Tell sops where it is in the `shellHook` in `flake.nix`.
 - This line as the FIRST line of `~/.ssh/config`, once per machine:
@@ -139,9 +141,12 @@ for details and what to re-run after which failure.
    nix run --inputs-from . backfabric -- keygen node1
    ```
 
-   From here on, work in the dev shell.
+   The first time, it also creates `secrets/common.yaml` with the k3s
+   cluster token (encrypted as `.sops.yaml` says; it never changes an
+   existing value). From here on, work in the dev shell.
 
-2. Add the host to `.sops.yaml`:
+2. Add the host to `.sops.yaml` (this re-encrypts `secrets/common.yaml` for
+   it):
 
    ```sh
    backfabric sops add-host node1
@@ -184,6 +189,57 @@ for details and what to re-run after which failure.
    ```sh
    backfabric finalize node1
    ```
+
+## The cluster
+
+Every host runs a k3s server that initializes its own cluster on embedded
+etcd; joining further nodes is not implemented yet, so a cluster is one
+host for now. The cluster token, `k3s-token` in `secrets/common.yaml`
+(read through `backfabric.secrets.commonFile`, set in `mkHost` in
+`flake.nix`), must never change: an etcd snapshot can only be restored
+with it. Keep it with the rest of this repository.
+
+The cluster is hardened as the
+[K3s CIS hardening guide](https://docs.k3s.io/security/hardening-guide)
+says; nothing in it is reachable from outside: the Kubernetes API is not
+exposed, and Services of type NodePort or LoadBalancer, or with
+`externalIPs`, are rejected. Pod Security Admission enforces `restricted` in
+every namespace except kube-system: pods must run as non-root, with
+`allowPrivilegeEscalation: false`, all capabilities dropped, and the
+`RuntimeDefault` seccomp profile. See
+[ADR 0017](https://github.com/backfabric/infra/blob/main/docs/adr/0017-cluster-hardening-defaults.md).
+
+Use `kubectl` on the host:
+
+```sh
+ssh node1
+kubectl get nodes
+kubectl get pods -A
+```
+
+Every API request is recorded (who, what, which object, the result; no
+request or response bodies) in `/var/lib/rancher/k3s/server/logs/audit.log`
+on the host, one JSON object per line, rotated at 100 MB (10 files, at most
+30 days):
+
+```sh
+ssh node1 tail -f /var/lib/rancher/k3s/server/logs/audit.log
+```
+
+The k3s version is pinned to a minor release
+(`backfabric.k3s.package`, default `pkgs.k3s_1_35`), so `nix flake update`
+only brings patch releases. To upgrade, set the next minor version (one at
+a time) in the host's configuration, e.g.
+`backfabric.k3s.package = pkgs.k3s_1_36;` (with `pkgs` among the module
+arguments), and deploy.
+
+If the hosts were installed before the cluster-wide secrets existed, create
+them once in the dev shell (needs your admin key if `secrets/common.yaml`
+exists), then commit and deploy:
+
+```sh
+backfabric keygen
+```
 
 ## Unlock after a reboot
 

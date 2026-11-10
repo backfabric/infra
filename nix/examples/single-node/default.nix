@@ -31,6 +31,13 @@
     initrdSsh.publicKey = builtins.readFile ./initrd_ssh_host_ed25519_key.pub;
   };
 
+  # A real host reads the k3s token from `secrets/common.yaml` of the private
+  # repository (set once for every host, in the template's `mkHost`), a file
+  # encrypted for the host. The example has no encrypted file, so the path
+  # does not exist and sops-nix must not check it at evaluation time.
+  backfabric.secrets.commonFile = "/example/secrets/common.yaml";
+  sops.validateSopsFiles = false;
+
   # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,
   # with the report that `backfabric probe` generates with nixos-facter. This
   # excerpt has the shape of a real report of a Hetzner server (fields the

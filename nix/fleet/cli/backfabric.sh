@@ -8,7 +8,8 @@ Usage: backfabric <command> [<argument>...]
 Commands for the hosts of the private repository, run from its root, in the
 order of a host's installation, then for its updates:
   sops init       Create .sops.yaml with the admin keys, once
-  keygen          Generate a host's keys and LUKS passphrase, locally
+  keygen          Generate a host's keys and LUKS passphrase, and missing
+                  cluster-wide secrets, locally
   sops add-host   Add a host to .sops.yaml and re-encrypt its files
   probe           Boot the server into the installer, get its hardware report
   install         Install a host on the server (erases its disks)

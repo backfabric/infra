@@ -23,4 +23,15 @@ inputs: {
       ./secrets.nix
     ];
   };
+  # Also imports the subsystems it reads options of (the node address, the
+  # cluster-wide sops file); the same paths in other entries are imported
+  # once.
+  k3s = {
+    imports = [
+      inputs.sops-nix.nixosModules.sops
+      ./secrets.nix
+      ./network.nix
+      ./k3s.nix
+    ];
+  };
 }
