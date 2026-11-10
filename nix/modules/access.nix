@@ -6,7 +6,7 @@
 #   - firewall (nftables backend): inbound closed except `ssh.port`, no ping
 #     replies. The initrd has no firewall.
 #
-# The public host keys are options so that the fleet dev shell (fleet/) can
+# The public host keys are options so that the fleet dev shell (nix/fleet/) can
 # generate a known_hosts file for every host.
 { config, lib, ... }:
 let

@@ -18,8 +18,8 @@
     let
       inherit (nixpkgs) lib;
 
-      # Subsystem modules registered in ./modules/default.nix.
-      subsystems = import ./modules inputs;
+      # Subsystem modules registered in ./nix/modules/default.nix.
+      subsystems = import ./nix/modules inputs;
 
       # Systems of the machines the operator works on.
       systems = [
@@ -33,7 +33,7 @@
       exampleSingleNode = lib.nixosSystem {
         modules = [
           self.nixosModules.default
-          ./examples/single-node
+          ./nix/examples/single-node
         ];
       };
 
@@ -51,9 +51,9 @@
         modules = [
           {
             hardware.facter = {
-              reportPath = ./examples/single-node/facter.json;
+              reportPath = ./nix/examples/single-node/facter.json;
               # What the upstream default of `report` does with `reportPath`.
-              report = lib.mkForce (lib.importJSON ./examples/single-node/facter.json);
+              report = lib.mkForce (lib.importJSON ./nix/examples/single-node/facter.json);
             };
           }
         ];
@@ -95,16 +95,16 @@
         assert lib.assertMsg ok "${name}: failed assertions: ${builtins.toJSON failed}";
         nixpkgs.legacyPackages.x86_64-linux.writeText name (builtins.toJSON failed);
 
-      # The facts the backfabric command reads (fleet/facts.nix), as an
+      # The facts the backfabric command reads (nix/fleet/facts.nix), as an
       # evaluation-only check.
       fleetFacts =
         name: system: reportPathOk:
         let
-          facts = import ./fleet/facts.nix system;
+          facts = import ./nix/fleet/facts.nix system;
         in
         assert facts.address == "203.0.113.10";
         assert facts.initrdHostKey == "/etc/secrets/initrd/ssh_host_ed25519_key";
-        assert facts.hostPublicKey == builtins.readFile ./examples/single-node/ssh_host_ed25519_key.pub;
+        assert facts.hostPublicKey == builtins.readFile ./nix/examples/single-node/ssh_host_ed25519_key.pub;
         assert reportPathOk facts.reportPath;
         nixpkgs.legacyPackages.x86_64-linux.writeText name (
           builtins.toJSON (removeAttrs facts [ "reportPath" ])
@@ -116,7 +116,7 @@
       templateCheck =
         name: hosts:
         let
-          template = import ./templates/default/flake.nix;
+          template = import ./nix/templates/default/flake.nix;
           outputs = template.outputs {
             self = outputs // {
               nixosConfigurations = hosts;
@@ -139,14 +139,14 @@
         };
       };
 
-      lib.mkFleetShell = import ./fleet/shell.nix;
+      lib.mkFleetShell = import ./nix/fleet/shell.nix;
 
       # The operator command `backfabric` on its own, for a host whose public
       # keys do not exist yet (see docs/fleet-shell.md).
       packages = forAllSystems (
         pkgs:
         let
-          backfabric = pkgs.callPackage ./fleet/cli { };
+          backfabric = pkgs.callPackage ./nix/fleet/cli { };
         in
         {
           inherit backfabric;
@@ -190,7 +190,7 @@
       };
 
       templates.default = {
-        path = ./templates/default;
+        path = ./nix/templates/default;
         description = "Private fleet repository: hosts and secrets using these modules";
         welcomeText = ''
           # Private fleet repository

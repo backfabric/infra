@@ -114,7 +114,7 @@ cmd_install() {
   # --- 3. Install -------------------------------------------------------------
 
   # The disko phase copies the passphrase to /tmp/disk-encryption.key on the
-  # server, where the disks' LUKS settings read it (modules/disks.nix).
+  # server, where the disks' LUKS settings read it (nix/modules/disks.nix).
   nixos-anywhere \
     --flake ".#$host" \
     --phases disko,install,reboot \
