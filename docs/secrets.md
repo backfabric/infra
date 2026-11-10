@@ -86,9 +86,20 @@ such edits.
 
 ### Admin keys
 
-sops finds the admin keys the usual way (`SOPS_AGE_KEY_FILE`, the GnuPG
-keyring, ...). The private repository can set them in its own dev shell,
-which adds to the fleet shell:
+`backfabric sops init` takes age recipients (`--age age1...`) and PGP
+fingerprints (`--pgp`). An SSH ed25519 key can be an admin key through
+[ssh-to-age](https://github.com/Mic92/ssh-to-age) (in the fleet shell):
+
+- recipient: `ssh-to-age < ~/.ssh/id_ed25519.pub` prints the `age1...` value
+  for `--age`;
+- decryption: `SOPS_AGE_KEY_CMD="ssh-to-age -private-key -i ~/.ssh/id_ed25519"`
+  lets sops derive the age identity from the private key file. This needs the
+  key as a file; a key that only lives in an agent or on a hardware token
+  cannot be used this way.
+
+sops finds the admin keys the usual way (`SOPS_AGE_KEY_FILE`,
+`SOPS_AGE_KEY_CMD`, the GnuPG keyring, ...). The private repository can set
+them in its own dev shell, which adds to the fleet shell:
 
 ```nix
 devShells.aarch64-darwin.default =

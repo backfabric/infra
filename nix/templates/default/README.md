@@ -16,8 +16,10 @@ secrets.
   Hetzner Robot for the Rescue system. The dev shell uses your default keys
   and ssh-agent, see
   [client keys](https://github.com/backfabric/infra/blob/main/docs/fleet-shell.md#client-keys).
-- An admin key for sops, of any kind sops supports (age, PGP, ...), stored
-  where you like. For example an age key:
+- An admin key for sops: an age key or a PGP key, stored where you like
+  (an SSH ed25519 key works through ssh-to-age, see
+  [admin keys](https://github.com/backfabric/infra/blob/main/docs/secrets.md#admin-keys)).
+  For example an age key:
   `nix shell nixpkgs#age -c age-keygen -o ~/.config/sops/age/fleet.txt`.
   Tell sops where it is in the `shellHook` in `flake.nix`.
 - This line as the FIRST line of `~/.ssh/config`, once per machine:
