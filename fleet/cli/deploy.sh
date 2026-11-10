@@ -56,7 +56,12 @@ cmd_deploy() {
     die "uncommitted changes in tracked files; commit them first (git status)"
 
   echo "Deploying $(git rev-parse --short HEAD) to $host ($action), built on $host ..."
-  nixos-rebuild "$action" --flake ".#$host" \
+  # nixos-rebuild puts its ssh ControlPath (ssh-<40 hex>.<16 random>) in a
+  # temporary directory under $TMPDIR and only shortens it against Linux's
+  # 107-byte socket path limit; macOS allows 103. Dev shells set a long
+  # TMPDIR (/tmp/nix-shell.XXXXXX, or under /var/folders with direnv), so
+  # the socket path no longer fits and ssh fails. /tmp fits on both.
+  TMPDIR=/tmp nixos-rebuild "$action" --flake ".#$host" \
     --target-host "$host" --build-host "$host" \
     --no-reexec --use-substitutes
 }
