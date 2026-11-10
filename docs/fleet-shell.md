@@ -86,7 +86,9 @@ Each host's directory holds its nixos-facter report (written by
 
 ## The shell
 
-`nix develop` provides:
+`nix develop`, or direnv through the template's `.envrc` (`use flake`, which
+also runs the shell hook, so `PROJECT_SSH_CONFIG` is set in your own shell
+while you are in the repository), provides:
 
 - `PROJECT_SSH_CONFIG`: the generated SSH config in the Nix store, exported
   by the shell hook (which also reaches a shell that includes this one with
