@@ -63,11 +63,11 @@ nix flake init -t github:backfabric/infra
   is a disk in the host's facter report. `backfabric install` passes the
   LUKS passphrase from `backfabric keygen` to nixos-anywhere with
   `--disk-encryption-keys /tmp/disk-encryption.key <file>`.
-- `network`: static IPv4 and IPv6 on the uplink, matched by MAC address,
-  with systemd-networkd, in the booted system and in the initrd. Set
-  `backfabric.network.macAddress`, `ipv4.address`, `ipv4.gateway`, and
-  `ipv6.address` (with `/64`) from the Hetzner Robot; `ipv6.gateway`
-  (`fe80::1`) and `nameservers` (Hetzner's resolvers) have defaults. The
+- `network`: static IPv4 on the uplink, matched by MAC address, with
+  systemd-networkd, in the booted system and in the initrd; IPv6 is
+  disabled. Set `backfabric.network.macAddress`, `ipv4.address`, and
+  `ipv4.gateway` from the Hetzner Robot; `nameservers` (Hetzner's IPv4
+  resolvers) has a default. The
   initrd network driver comes from nixos-facter: set
   `hardware.facter.reportPath` to the host's report (e.g. `./facter.json`),
   which `backfabric probe` generates. Evaluation fails without a network

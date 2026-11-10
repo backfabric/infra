@@ -17,7 +17,6 @@
       address = "203.0.113.10";
       gateway = "203.0.113.1";
     };
-    ipv6.address = "2001:db8::2/64";
   };
 
   backfabric.access = {

@@ -87,8 +87,6 @@ for the hardware summary of `backfabric probe` (step 3 below):
     # Robot, server, IPs: the main IPv4 address and its gateway.
     ipv4.address = "203.0.113.10";
     ipv4.gateway = "203.0.113.1";
-    # Robot, server, IPs: an address of the IPv6 /64 subnet, with /64.
-    ipv6.address = "2001:db8::2/64";
   };
 
   backfabric.access = {
