@@ -10,9 +10,9 @@ the private repository and decrypted on the host by
   `/etc/ssh/ssh_host_ed25519_key`. The matching age recipient is derived
   from the public key with `ssh-to-age`. No other key is used on the host.
 - The host key is generated before the install and copied to the host with
-  nixos-anywhere `--extra-files`, so the first boot can already decrypt. The
-  install command (see [fleet-shell.md](fleet-shell.md)) does this. sshd
-  uses the same key.
+  nixos-anywhere `--extra-files`, so the first boot can already decrypt.
+  `backfabric keygen` and `backfabric install` do this (see
+  [fleet-shell.md](fleet-shell.md)). sshd uses the same key.
 - Admins decrypt and edit secrets with their own keys. Which kind of key
   (age, PGP, ...) and where it lives is the private repository's choice; the
   commands here never create or look for admin keys. They only add and
@@ -129,17 +129,18 @@ nothing. If it is there with another key, the command refuses; with
 `--replace` it replaces the value of `&host_node1`, which every rule refers to,
 and re-encrypts the files as above.
 
-`backfabric install` runs `backfabric sops add-host --replace <host>` after
-writing the host's `.pub` files, if `.sops.yaml` exists. Host names may
-contain letters, digits, `-` and `_`; `common` is reserved.
+`backfabric keygen` writes the host's `.pub` files; add the host to
+`.sops.yaml` right after it, before `backfabric install`, which refuses
+while the host is missing from `.sops.yaml` or is there with another key.
+Host names may contain letters, digits, `-` and `_`; `common` is reserved.
 
-Before a host's `.pub` files exist, the dev shell cannot be evaluated; the
-commands also run on their own, from the private repository's pinned input
-(named `backfabric` here):
+In a new private repository, without hosts, the dev shell evaluates and
+`sops init` runs in it. If the shell does not evaluate (a host without `.pub`
+files), the commands also run on their own,
+from the private repository's pinned input (named `backfabric` here):
 
 ```sh
 nix run --inputs-from . backfabric -- sops init --age age1...
-nix run --inputs-from . backfabric -- sops add-host node1
 ```
 
 Commit `.sops.yaml` and the re-encrypted files before deploying the host.
@@ -162,8 +163,8 @@ If the old key may have leaked, also run `sops rotate -i <file>` to replace
 the data key, and change the secret values themselves: the git history still
 holds them encrypted to the old key.
 
-Reinstalling a host generates a new host key as well; the install command
-replaces the host's key in `.sops.yaml` itself.
+Reinstalling a host generates a new host key as well (`backfabric keygen`);
+run `backfabric sops add-host --replace <host>` before `backfabric install`.
 
 ## Losing a host key
 

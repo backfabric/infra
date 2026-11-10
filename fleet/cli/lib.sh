@@ -41,3 +41,85 @@ host_facts() {
   nix eval --json ".#nixosConfigurations.\"$host\"" \
     --apply "system: { inherit (($(<"$factsNix")) system) $*; }"
 }
+
+# host_files <reportPath>: sets `report`, the host's nixos-facter report in the
+# working tree, and next to it `hostPub` and `initrdPub`, the public key
+# files. `reportPath` (hardware.facter.reportPath, from host_facts) is a path
+# in the flake source, which is the git repository copied to the Nix store;
+# it is mapped back to the working tree.
+host_files() {
+  local repo
+  repo=$(git rev-parse --show-toplevel 2>/dev/null) || die "$PWD is not in a git repository"
+  [[ -n $1 ]] ||
+    die "hardware.facter.reportPath of $host is not set; set it to e.g. ./facter.json next to the host's configuration"
+  [[ $1 =~ ^/nix/store/[^/]+/(.+)$ ]] ||
+    die "hardware.facter.reportPath of $host is not a file in the repository: $1"
+  report=$repo/${BASH_REMATCH[1]}
+  hostPub=$(dirname "$report")/ssh_host_ed25519_key.pub
+  initrdPub=$(dirname "$report")/initrd_ssh_host_ed25519_key.pub
+}
+
+# The state directory of a host between `backfabric keygen` and
+# `backfabric finalize`, outside the repository:
+#   extra-files/  for nixos-anywhere --extra-files: the private host key
+#                 (etc/ssh/ssh_host_ed25519_key) and the initrd host key
+#                 (at backfabric.access.initrdSsh.hostKey), from keygen;
+#   luks          the LUKS passphrase, from keygen;
+#   known_hosts   the pinned host key of the Rescue system, which the kexec
+#                 installer keeps, from probe.
+state_dir() {
+  echo "${XDG_STATE_HOME:-$HOME/.local/state}/backfabric/$1"
+}
+
+# The fleet shell's `ssh` knows the hosts (aliases, ports, host keys).
+require_fleet_shell() {
+  [[ ${BACKFABRIC_FLEET_SHELL-} == 1 ]] ||
+    die "run inside the fleet dev shell (nix develop in the private repository), whose ssh knows $host and $host-initrd"
+}
+
+# use_pinned_ssh <known_hosts>: puts an ssh first in PATH, for this command
+# and the nixos-anywhere, nix and ssh-copy-id it runs, that only accepts the
+# host keys in <known_hosts>. nixos-anywhere passes `-o
+# StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null` to ssh, and ssh
+# uses the first value of an option, so its `--ssh-option` cannot enable
+# checking; this ssh puts the pinned options first.
+use_pinned_ssh() {
+  local dir
+  dir=$(mktemp -d)
+  # shellcheck disable=SC2064 # expand now: $dir is local
+  trap "rm -rf '$dir'" EXIT
+  printf '#!%s\nexec %q -o UserKnownHostsFile=%q -o GlobalKnownHostsFile=none -o StrictHostKeyChecking=yes "$@"\n' \
+    "$BASH" "$(command -v ssh)" "$1" >"$dir/ssh"
+  chmod +x "$dir/ssh"
+  PATH=$dir:$PATH
+}
+
+# check_uplink <host> <address> <macAddress>: on the server in the NixOS
+# installer (with use_pinned_ssh), checks that an interface has the
+# configured MAC address and that its kernel module is in the host's initrd,
+# which needs it for SSH. nixos-facter reports do not contain MAC addresses,
+# so this cannot be an evaluation-time assertion.
+check_uplink() {
+  local host=$1 address=$2 mac=${3,,} links ifname module modules
+  links=$(ssh -o ConnectTimeout=10 "root@$address" ip -j link) ||
+    die "cannot list the network interfaces of $address"
+  echo "Network interfaces of the server (ip link):"
+  jq -r '.[] | select(.link_type == "ether") | "  \(.ifname)  \(.permaddr // .address)"' <<<"$links"
+  ifname=$(jq -r --arg mac "$mac" '
+    first(.[] | select([.address, .permaddr] | map(ascii_downcase?) | index($mac)) | .ifname) // empty
+  ' <<<"$links")
+  [[ -n $ifname ]] ||
+    die "backfabric.network.macAddress of $host ($mac) is on no interface of the server; set it to the uplink's MAC above"
+  # shellcheck disable=SC2029 # expand locally: the interface name
+  module=$(ssh -o ConnectTimeout=10 "root@$address" \
+    "readlink /sys/class/net/$(printf %q "$ifname")/device/driver/module") || true
+  module=${module##*/}
+  [[ -n $module ]] ||
+    die "cannot determine the kernel module of the uplink $ifname (no /sys/class/net/$ifname/device/driver/module)"
+  modules=$(nix eval --json ".#nixosConfigurations.\"$host\".config.boot.initrd" \
+    --apply 'initrd: initrd.kernelModules ++ initrd.availableKernelModules') ||
+    die "cannot evaluate the initrd kernel modules of $host"
+  jq -e --arg module "${module//-/_}" 'map(gsub("-"; "_")) | index($module) != null' <<<"$modules" >/dev/null ||
+    die "the driver of the uplink $ifname ($mac), kernel module $module, is not in the initrd of $host, so the initrd would have no network for unlocking; the facter report should list it as a driver module of a network controller"
+  echo "Uplink: $ifname ($mac), kernel module $module, which is in the initrd."
+}

@@ -21,13 +21,17 @@ Status: work in progress.
 - `fleet/`: the fleet dev shell for the operator machine,
   `lib.mkFleetShell { pkgs, nixosConfigurations }`, with a generated SSH
   config and the operator command `backfabric` (`fleet/cli/`; subcommands
-  `sops init`, `install`, `sops add-host`; also `packages.<system>.backfabric`,
-  the default package), see [docs/fleet-shell.md](docs/fleet-shell.md) and
+  `sops init`, `keygen`, `sops add-host`, `probe`, `install`, `unlock`,
+  `finalize`; also `packages.<system>.backfabric`, the default package), see
+  [docs/fleet-shell.md](docs/fleet-shell.md) and
   [docs/secrets.md](docs/secrets.md).
-- `examples/single-node/`: an example host with two disks, evaluated by
-  `checks.x86_64-linux.example-single-node`, and with one disk by
-  `checks.x86_64-linux.example-single-disk`; its fleet dev shell is
-  `devShells.<system>.example-fleet`.
+- `examples/single-node/`: an example host with two disks and an excerpt of
+  a facter report, evaluated by `checks.x86_64-linux.example-single-node`,
+  and with one disk by `checks.x86_64-linux.example-single-disk`; its fleet
+  dev shell is `devShells.<system>.example-fleet`. The `assertions-*` checks
+  evaluate the assertions that compare a configuration with its facter
+  report: none fails for the example, and a report without a network driver
+  or without a configured disk fails the expected one.
 - `templates/default/`: the skeleton of the private repository, see below;
   evaluated by `checks.x86_64-linux.template-empty` and
   `checks.x86_64-linux.template-with-host`.
@@ -54,8 +58,10 @@ nix flake init -t github:backfabric/infra
   (subvolumes `@` for `/`, `@nix` for `/nix`); GRUB mirrored to every disk
   for BIOS and UEFI boot. Set
   `backfabric.disks.devices` to the `/dev/disk/by-id/...` paths of the
-  system disks. The install command passes the LUKS passphrase to
-  nixos-anywhere with `--disk-encryption-keys /tmp/disk-encryption.key <file>`.
+  system disks (`backfabric probe` lists them); evaluation fails unless each
+  is a disk in the host's facter report. `backfabric install` passes the
+  LUKS passphrase from `backfabric keygen` to nixos-anywhere with
+  `--disk-encryption-keys /tmp/disk-encryption.key <file>`.
 - `network`: static IPv4 and IPv6 on the uplink, matched by MAC address,
   with systemd-networkd, in the booted system and in the initrd. Set
   `backfabric.network.macAddress`, `ipv4.address`, `ipv4.gateway`, and
@@ -63,19 +69,21 @@ nix flake init -t github:backfabric/infra
   (`fe80::1`) and `nameservers` (Hetzner's resolvers) have defaults. The
   initrd network driver comes from nixos-facter: set
   `hardware.facter.reportPath` to the host's report (e.g. `./facter.json`),
-  which the install command generates if it is missing. Evaluation fails
-  without it.
+  which `backfabric probe` generates. Evaluation fails without a network
+  controller with a driver in it. Facter reports contain no MAC addresses,
+  so `backfabric probe` and `install` check on the server that the MAC
+  exists and its driver is in the initrd.
 - `access`: root login with SSH keys only on `backfabric.access.ssh.port`,
   the only port open in the (nftables) firewall; no ping replies. The initrd
   runs an SSH server on `backfabric.access.initrdSsh.port` to unlock the
   disks, see [docs/initrd-unlock.md](docs/initrd-unlock.md). Set
   `authorizedKeys`, both ports, and the public host keys
-  `hostKey.publicKey` and `initrdSsh.publicKey` from the `.pub` files the
-  install command writes next to the facter report.
+  `hostKey.publicKey` and `initrdSsh.publicKey` from the `.pub` files
+  `backfabric keygen` writes next to the facter report.
 - `secrets`: sops-nix, decrypting with the SSH ed25519 host key
   (`/etc/ssh/ssh_host_ed25519_key`) only; no options of its own. Set
   `sops.defaultSopsFile` to the encrypted file; other subsystems declare
-  their own `sops.secrets.*`. The install command copies the host key with
+  their own `sops.secrets.*`. `backfabric install` copies the host key with
   nixos-anywhere `--extra-files` so the first boot can decrypt, see
   [docs/secrets.md](docs/secrets.md).
 

@@ -59,6 +59,42 @@
         ];
       };
 
+      # Variants of the example whose facter report does not match its
+      # configuration.
+      exampleWithReport =
+        change:
+        exampleSingleNode.extendModules {
+          modules = [
+            {
+              hardware.facter.report = lib.mkForce (
+                lib.recursiveUpdate exampleSingleNode.config.hardware.facter.report change
+              );
+            }
+          ];
+        };
+      exampleWithoutNicDriver = exampleWithReport {
+        hardware.network_controller = [ { driver_modules = [ ]; } ];
+      };
+      exampleWithMissingDisk = exampleWithReport {
+        hardware.disk = lib.take 1 exampleSingleNode.config.hardware.facter.report.hardware.disk;
+      };
+
+      # Evaluates the messages of the failed assertions of `system`, without
+      # building it: none if `expected` is empty, else for each string in
+      # `expected` a message that contains it.
+      assertionsCheck =
+        name: system: expected:
+        let
+          failed = map (a: a.message) (lib.filter (a: !a.assertion) system.config.assertions);
+          ok =
+            if expected == [ ] then
+              failed == [ ]
+            else
+              lib.all (text: lib.any (lib.hasInfix text) failed) expected;
+        in
+        assert lib.assertMsg ok "${name}: failed assertions: ${builtins.toJSON failed}";
+        nixpkgs.legacyPackages.x86_64-linux.writeText name (builtins.toJSON failed);
+
       # The facts the backfabric command reads (fleet/facts.nix), as an
       # evaluation-only check.
       fleetFacts =
@@ -130,6 +166,16 @@
       checks.x86_64-linux = {
         example-single-node = exampleSingleNode.config.system.build.toplevel;
         example-single-disk = exampleSingleDisk.config.system.build.toplevel;
+        # The assertions that check the configuration against the facter
+        # report: all pass for the example, and each mismatch is reported.
+        assertions-example = assertionsCheck "assertions-example" exampleSingleNode [ ];
+        assertions-single-disk = assertionsCheck "assertions-single-disk" exampleSingleDisk [ ];
+        assertions-no-nic-driver = assertionsCheck "assertions-no-nic-driver" exampleWithoutNicDriver [
+          "backfabric.network: no network driver for the initrd"
+        ];
+        assertions-missing-disk = assertionsCheck "assertions-missing-disk" exampleWithMissingDisk [
+          "backfabric.disks.devices: /dev/disk/by-id/nvme-EXAMPLE_DISK_1 is not a disk"
+        ];
         fleet-facts-with-report = fleetFacts "fleet-facts-with-report" exampleSingleNode (
           reportPath: reportPath == null
         );

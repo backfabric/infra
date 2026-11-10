@@ -35,8 +35,12 @@ writeShellApplication {
   + lib.concatMapStrings builtins.readFile [
     ./lib.sh
     ./sops-init.sh
+    ./keygen.sh
     ./sops-add-host.sh
+    ./probe.sh
     ./install.sh
+    ./unlock.sh
+    ./finalize.sh
     ./backfabric.sh
   ];
 }

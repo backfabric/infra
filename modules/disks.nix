@@ -111,6 +111,25 @@ in
   };
 
   config = {
+    # The report lists every name of a disk, including its /dev/disk/by-id/
+    # links, in `hardware.disk[].unix_device_names`.
+    assertions =
+      let
+        reported = lib.concatMap (disk: disk.unix_device_names or [ ]) (
+          config.hardware.facter.report.hardware.disk or [ ]
+        );
+      in
+      lib.optionals config.hardware.facter.enable (
+        map (device: {
+          assertion = lib.elem device reported;
+          message = ''
+            backfabric.disks.devices: ${device} is not a disk in the
+            nixos-facter report (hardware.facter.reportPath). Use the
+            /dev/disk/by-id/ names that backfabric probe lists for the disks.
+          '';
+        }) cfg.devices
+      );
+
     disko.devices.disk = lib.listToAttrs (
       map (disk: lib.nameValuePair disk.name (diskoDisk disk)) disks
     );
