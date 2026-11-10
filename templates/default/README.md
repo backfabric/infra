@@ -8,6 +8,10 @@ secrets.
 ## Prerequisites
 
 - Nix with flakes enabled, and git.
+- Optional: [direnv](https://direnv.net) with
+  [nix-direnv](https://github.com/nix-community/nix-direnv), which loads the
+  dev shell on entering the directory (`.envrc`). Everything below works in
+  `nix develop` as well.
 - An SSH key pair; its public key goes into `authorizedKeys` and into the
   Hetzner Robot for the Rescue system. The dev shell uses your default keys
   and ssh-agent, see
@@ -43,13 +47,15 @@ git commit -m "chore: initial fleet repository"
 A flake in a git repository only sees files known to git: `git add` every new
 file before running a command.
 
-`nix develop` enters the fleet dev shell: `nixos-rebuild`, `nixos-anywhere`,
-`sops`, and the `backfabric` command, and `PROJECT_SSH_CONFIG`, through
-which `ssh`, `scp`, `nix copy`, and the rest know every host in
-`nixosConfigurations`. Create `.sops.yaml` with your admin key(s), once:
+The fleet dev shell provides `nixos-rebuild`, `nixos-anywhere`, `sops`, the
+`backfabric` command, and `PROJECT_SSH_CONFIG`, through which `ssh`, `scp`,
+`nix copy`, and the rest know every host in `nixosConfigurations`. Enter it
+with `direnv allow` (once; afterwards it loads whenever you `cd` into the
+repository and reloads when `flake.nix`, `flake.lock`, or `hosts/` change)
+or with `nix develop`. Create `.sops.yaml` with your admin key(s), once:
 
 ```sh
-nix develop
+direnv allow                         # or: nix develop
 backfabric sops init --age age1...   # --age and --pgp, repeatable
 git add .sops.yaml && git commit -m "chore: add sops configuration"
 ```
@@ -127,15 +133,15 @@ for details and what to re-run after which failure.
 
 1. Generate the host's SSH host keys and LUKS passphrase, locally, into
    `~/.local/state/backfabric/node1/`; the `.pub` files go into
-   `hosts/node1/`. Until they exist, `nix develop` does not evaluate (it
-   reads every host's public keys), hence `nix run` from the pinned
-   `backfabric` input:
+   `hosts/node1/`. Until they exist, the dev shell does not evaluate (it
+   reads every host's public keys; direnv keeps the previous environment and
+   prints the error), hence `nix run` from the pinned `backfabric` input:
 
    ```sh
    nix run --inputs-from . backfabric -- keygen node1
    ```
 
-   From here on, work in `nix develop`.
+   From here on, work in the dev shell.
 
 2. Add the host to `.sops.yaml`:
 
@@ -184,7 +190,7 @@ for details and what to re-run after which failure.
 ## Unlock after a reboot
 
 After every reboot the host waits for the LUKS passphrase in the initrd.
-Inside `nix develop`, type it at the prompt or pipe it in:
+In the dev shell, type it at the prompt or pipe it in:
 
 ```sh
 backfabric unlock node1
@@ -195,7 +201,7 @@ See [unlocking the disks](https://github.com/backfabric/infra/blob/main/docs/ini
 
 ## Update a host
 
-Commit the change, then inside `nix develop` (the host builds its own
+Commit the change, then in the dev shell (the host builds its own
 system):
 
 ```sh
