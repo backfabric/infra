@@ -5,7 +5,8 @@ usage_finalize() {
   cat <<'EOF'
 Usage: backfabric finalize <host>
 
-Run inside the fleet dev shell, from the root of the private repository,
+Run inside the fleet dev shell (with `Include ${PROJECT_SSH_CONFIG}` as the
+first line of ~/.ssh/config), from the root of the private repository,
 after the installed host booted:
   1. Checks that `ssh <host>` works with the host key from the repository.
   2. Asks you to store the LUKS passphrase from the host's state directory in
@@ -31,7 +32,7 @@ cmd_finalize() {
   host=$1
 
   check_host_name "$host"
-  require_fleet_shell
+  require_fleet_ssh "$host"
   require_flake
 
   state=$(state_dir "$host")

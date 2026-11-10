@@ -1,10 +1,39 @@
 # Fleet dev shell and installing a host
 
 The private repository builds a dev shell from its `nixosConfigurations`. In
-that shell, `ssh`, `nix copy`, `nixos-rebuild`, and `nixos-anywhere` know
-every host by name, with its address, ports, and host keys. Nothing is
-written to `~/.ssh`, and client keys are not configured: ssh authenticates
-with whatever the operator machine provides (default keys, agent, ...).
+that shell, every SSH client of the operator machine (`ssh`, `scp`, `sftp`,
+`rsync`, `git`, `nix copy`, `nixos-rebuild`, `nixos-anywhere`) knows every
+host by name, with its address, ports, and host keys. The shell only exports
+`PROJECT_SSH_CONFIG`, the path of a generated SSH config; one line in your
+`~/.ssh/config` includes it. Nothing is written to `~/.ssh` by this
+repository, and client keys are not configured: ssh authenticates with
+whatever the operator machine provides (default keys, agent, ...).
+
+## One-time setup of ~/.ssh/config
+
+Make this the first line of `~/.ssh/config`, once per operator machine (it
+works for any project whose dev shell exports `PROJECT_SSH_CONFIG`):
+
+```
+Include ${PROJECT_SSH_CONFIG}
+```
+
+OpenSSH expands environment variables in `Include` paths (ssh_config(5),
+`Include`); when the variable is unset, the line includes nothing.
+
+- Why first: ssh uses the first value it obtains for each option. Above your
+  own blocks (e.g. `Host *` with `User` or `UserKnownHostsFile`), the fleet
+  blocks decide the user, port, and host key checking of fleet aliases. The
+  generated config only matches fleet aliases, so it changes nothing for
+  other hosts.
+- Inside the dev shell, the aliases below resolve for every tool that runs
+  ssh, including `scp` and `sftp` with a built-in ssh path and
+  `/usr/bin/ssh`.
+- Outside the shell, or without the line, an alias like `node1` is an
+  ordinary host name: ssh resolves it through DNS (usually failing) and
+  checks host keys against your personal `~/.ssh/known_hosts`, not the
+  fleet's. `backfabric unlock` and `finalize` check with `ssh -G` that the
+  alias resolves through the fleet config and refuse otherwise.
 
 ## Setup in the private repository
 
@@ -59,16 +88,13 @@ Each host's directory holds its nixos-facter report (written by
 
 `nix develop` provides:
 
-- `ssh`: a wrapper that runs the operator machine's own ssh client (the next
-  `ssh` in `PATH` after the wrapper, e.g. `/usr/bin/ssh` on macOS) with
-  `-F <generated config>`. Being first in `PATH`, it is also used by
-  `nix copy --to ssh-ng://<host>` (and `ssh://`), by `nixos-rebuild`
-  (`--target-host`, `--build-host`, via ssh and `nix-copy-closure`), and by
-  `nixos-anywhere` (whose own openssh comes last in its `PATH`, after the
-  operator's).
+- `PROJECT_SSH_CONFIG`: the generated SSH config in the Nix store, exported
+  by the shell hook (which also reaches a shell that includes this one with
+  `inputsFrom`).
 - `nixos-anywhere`, `nixos-rebuild` (nixos-rebuild-ng, also on macOS),
   `sops`, `ssh-to-age`, and `backfabric`, the command of this repository
-  (see [below](#the-backfabric-command)).
+  (see [below](#the-backfabric-command)). `ssh` itself is the operator
+  machine's own client.
 
 The generated config defines per host:
 
@@ -80,11 +106,10 @@ The generated config defines per host:
 with `User root`, `HostKeyAlias <alias>` (so the two host keys of one address
 are kept apart), a generated known_hosts file in the Nix store,
 `GlobalKnownHostsFile none`, `StrictHostKeyChecking yes`, and
-`UpdateHostKeys no`. ssh uses the first value it finds for each option; the
-fleet blocks come first, then `~/.ssh/config` and `/etc/ssh/ssh_config` are
-included for everything else (`-F` would otherwise skip both). For a fleet
-host, the user's configuration can still add options the fleet blocks do not
-set.
+`UpdateHostKeys no`. It does not include `~/.ssh/config` or
+`/etc/ssh/ssh_config`: ssh reads both itself, and including `~/.ssh/config`
+from a file it includes would recurse. For a fleet host, your own
+configuration can still add options the fleet blocks do not set.
 
 ### Client keys
 
@@ -99,8 +124,9 @@ Host node1 node1-initrd
   IdentitiesOnly yes
 ```
 
-This applies because the generated config includes `~/.ssh/config` for every
-host and sets neither `IdentityFile` nor `IdentitiesOnly` itself.
+This applies because ssh reads the rest of `~/.ssh/config` for fleet
+aliases too, and the generated config sets neither `IdentityFile` nor
+`IdentitiesOnly` itself.
 
 Examples:
 
@@ -118,9 +144,7 @@ committing the new `.pub` files.
 The shell reads only a few options of each host (address, ports, public
 keys; `fleet/facts.nix`), without the module system's full checks, so it
 evaluates as soon as every host has its two `.pub` files, even before the
-host's facter report exists. The shell sets `BACKFABRIC_FLEET_SHELL=1`
-(through its `shellHook`, which also reaches a shell that includes it with
-`inputsFrom`); `backfabric unlock` and `finalize` require it.
+host's facter report exists.
 
 ## The `backfabric` command
 
@@ -252,7 +276,8 @@ generates a report.
 ### unlock and finalize
 
 See [initrd-unlock.md](initrd-unlock.md) for `unlock`. `finalize` runs
-`ssh <host> true` (the dev shell checks the host key from the repository),
+`ssh <host> true` (through the fleet config, so the host key from the
+repository is checked),
 shows where the passphrase is, asks you to store it in your password manager
 and to confirm with `y`, deletes the state directory, and lists the files to
 commit.
