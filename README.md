@@ -39,7 +39,8 @@ Status: work in progress.
   [the fleet dev shell and installing a host](docs/fleet-shell.md),
   [replacing a failed disk](docs/disk-replacement.md),
   [unlocking the disks over SSH](docs/initrd-unlock.md),
-  [managing secrets](docs/secrets.md).
+  [managing secrets](docs/secrets.md);
+  architectural decisions in [docs/adr/](docs/adr/).
 
 ## Private repository
 

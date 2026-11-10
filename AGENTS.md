@@ -4,6 +4,13 @@ Public NixOS flake: modules for an encrypted k3s cluster on Hetzner bare
 metal, plus the operator tooling (`fleet/`) and the template of the private
 repository that consumes them. Layout and subsystems: [README.md](README.md).
 
+Architectural decisions and their reasons: [docs/adr/](docs/adr/). Read the
+matching ADR before changing disks, boot, networking, access, the cluster,
+secrets, installation, deployment, or the operator tooling; a change that
+contradicts an ADR is put to the user first, and an accepted new decision of
+that weight (hard to reverse, surprising, a real trade-off) gets its own ADR
+in the same PR.
+
 ## Boundary
 
 - This repository is public and consumer-agnostic. Host data (IPs, MACs, disk
