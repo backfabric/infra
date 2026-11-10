@@ -12,8 +12,7 @@ let
   # the shell evaluates as soon as every host has its `.pub` files.
   facts = lib.mapAttrs (_: import ./facts.nix) nixosConfigurations;
 
-  # SSH options per alias. Port knocking (Stage 4) adds a `ProxyCommand` to
-  # the alias of the booted system.
+  # SSH options per alias.
   aliases = lib.concatMapAttrs (host: host': {
     ${host} = {
       HostName = host'.address;
