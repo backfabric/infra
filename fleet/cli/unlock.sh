@@ -5,7 +5,8 @@ usage_unlock() {
   cat <<'EOF'
 Usage: backfabric unlock <host>
 
-Run inside the fleet dev shell. Sends the LUKS passphrase of <host> to its
+Run inside the fleet dev shell, with `Include ${PROJECT_SSH_CONFIG}` as the
+first line of ~/.ssh/config. Sends the LUKS passphrase of <host> to its
 initrd over `ssh <host>-initrd`, where systemd-tty-ask-password-agent answers
 the pending passphrase requests of systemd-cryptsetup. The passphrase comes
 from the host's state directory (between backfabric keygen and finalize),
@@ -31,7 +32,7 @@ cmd_unlock() {
   host=$1
 
   check_host_name "$host"
-  require_fleet_shell
+  require_fleet_ssh "$host-initrd"
 
   luks=$(state_dir "$host")/luks
   if [[ -f $luks ]]; then

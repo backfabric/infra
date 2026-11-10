@@ -19,7 +19,7 @@ writeShellApplication {
   name = "backfabric";
   # Deliberately not listed: `nix` (the operator's own Nix evaluates the
   # private repository) and openssh (ssh and ssh-keygen are the operator's
-  # own client, as in the fleet shell's ssh wrapper).
+  # own client, which reads the fleet config through ~/.ssh/config).
   runtimeInputs = [
     coreutils
     gitMinimal
