@@ -67,7 +67,14 @@ written by the install command:
   `nixos-anywhere` (whose own openssh comes last in its `PATH`, after the
   operator's).
 - `nixos-anywhere`, `nixos-rebuild` (nixos-rebuild-ng, also on macOS),
-  `sops`, `ssh-to-age`, and `backfabric-install`.
+  `sops`, `ssh-to-age`, and the commands of this repository:
+  - `backfabric-install <host>`: installs a host, see below;
+  - `backfabric-sops-init --age <recipient> --pgp <fingerprint> ...`: creates
+    `.sops.yaml` with the admin keys, once;
+  - `backfabric-sops-add-host [--replace] <host>`: adds a host's age
+    recipient to `.sops.yaml` and re-encrypts its files.
+
+  The sops commands are described in [secrets.md](secrets.md).
 
 The generated config defines per host:
 
@@ -149,16 +156,15 @@ The command:
    installer keeps the Rescue host keys.
 3. Generates the ed25519 host key (`/etc/ssh/ssh_host_ed25519_key`) and the
    initrd host key (at `initrdSsh.hostKey`) into a temporary `--extra-files`
-   tree, and writes `ssh_host_ed25519_key.pub` and
-   `initrd_ssh_host_ed25519_key.pub` into the directory of the facter report.
-   The private keys never enter the repository or the Nix store.
-4. Prints the host's age recipient (`ssh-to-age`) and waits until it appears
-   in `.sops.yaml`; adding it to the right `creation_rules` is up to you (see
-   [secrets.md](secrets.md)). Then runs `sops updatekeys -y` on every
-   sops-encrypted file tracked by git. Without `.sops.yaml` this step is
-   skipped.
-5. Reads the LUKS passphrase twice into a temporary file (mode 600) for
+   tree. The private keys never enter the repository or the Nix store.
+4. Reads the LUKS passphrase twice into a temporary file (mode 600) for
    `--disk-encryption-keys /tmp/disk-encryption.key`.
+5. Writes `ssh_host_ed25519_key.pub` and `initrd_ssh_host_ed25519_key.pub`
+   into the directory of the facter report. If `.sops.yaml` exists, runs
+   `backfabric-sops-add-host --replace node1`, which adds the host's age
+   recipient (or replaces the one of an earlier install) and runs
+   `sops updatekeys` on `secrets/common.yaml` and `secrets/node1.yaml` (needs
+   an admin key; see [secrets.md](secrets.md)).
 6. Runs nixos-anywhere with `--flake .#node1 --build-on remote --extra-files`.
    If the facter report is missing, nixos-anywhere generates it after the
    kexec (`--generate-hardware-config nixos-facter`), before evaluating the
@@ -171,9 +177,10 @@ staging their content. Commit them afterwards, with `.sops.yaml` and the
 re-encrypted files.
 
 If the command fails, the generated private keys are gone. Unless the host
-was installed nevertheless, delete the two `.pub` files and remove the
-recipient from `.sops.yaml` before retrying. To reinstall a host, do the same
-first: the command refuses to overwrite existing `.pub` files.
+was installed nevertheless, delete the two `.pub` files before retrying; the
+retry replaces the host's recipient in `.sops.yaml`. To reinstall a host,
+delete them first as well: the command refuses to overwrite existing `.pub`
+files.
 
 After the install, the host waits for the passphrase on every boot; see
 [initrd-unlock.md](initrd-unlock.md).

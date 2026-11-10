@@ -13,12 +13,13 @@ Hetzner Rescue system. ERASES ALL DISKS of the server.
 Steps:
   1. Connect to the Rescue system (root, port 22), pin its host key in a
      temporary known_hosts and show its fingerprint for comparison.
-  2. Generate the SSH host key and the initrd host key; write the public keys
-     next to the host's nixos-facter report (hardware.facter.reportPath):
-     ssh_host_ed25519_key.pub and initrd_ssh_host_ed25519_key.pub.
-  3. Print the host's age recipient, wait until it is in .sops.yaml, and run
-     `sops updatekeys` on every sops-encrypted file in the repository.
-  4. Read the LUKS passphrase.
+  2. Generate the SSH host key and the initrd host key.
+  3. Read the LUKS passphrase.
+  4. Write the public keys next to the host's nixos-facter report
+     (hardware.facter.reportPath): ssh_host_ed25519_key.pub and
+     initrd_ssh_host_ed25519_key.pub. If .sops.yaml exists, add the host to
+     it with `backfabric-sops-add-host --replace`, which also runs
+     `sops updatekeys` on the host's files.
   5. Run nixos-anywhere (build on the server), generating the nixos-facter
      report first if it is missing.
 
@@ -58,10 +59,11 @@ hosts=$(nix eval --json .#nixosConfigurations --apply builtins.attrNames) ||
 jq -e --arg host "$host" 'index($host) != null' <<<"$hosts" >/dev/null ||
   die "no nixosConfigurations.$host; hosts: $(jq -r 'join(", ")' <<<"$hosts")"
 
-# fleet/facts.nix ($factsNix, set by fleet/install.nix) reads only the facts
-# needed here; it works without a facter report and without the public key
-# files. Passed as text: pure evaluation may not import it from its path.
-facts=$(nix eval --json ".#nixosConfigurations.\"$host\"" --apply "$(<"$factsNix")")
+# fleet/facts.nix ($factsNix, set by fleet/install.nix) works without a
+# facter report; the facts read here also work without the public key files.
+# Passed as text: pure evaluation may not import it from its path.
+facts=$(nix eval --json ".#nixosConfigurations.\"$host\"" \
+  --apply "system: { inherit (($(<"$factsNix")) system) address initrdHostKey reportPath; }")
 address=$(jq -r .address <<<"$facts")
 initrdHostKey=$(jq -r .initrdHostKey <<<"$facts")
 reportPath=$(jq -r '.reportPath // empty' <<<"$facts")
@@ -83,25 +85,25 @@ initrdPub=$hostDir/initrd_ssh_host_ed25519_key.pub
 
 for pub in "$hostPub" "$initrdPub"; do
   [[ ! -e $pub ]] ||
-    die "$pub exists; to reinstall $host with new host keys, delete both .pub files and replace the host's recipient in .sops.yaml"
+    die "$pub exists; to reinstall $host with new host keys, delete both .pub files"
 done
 
 # --- Temporary directory ----------------------------------------------------
 
 tmp=$(mktemp -d)
 installed=n
-recipient=
-# The private keys only exist in $tmp: after a failure, the public keys and
-# the recipient are useless and must not stay behind.
+generated=n
+# The private keys only exist in $tmp: after a failure, the public keys are
+# useless and must not stay behind.
 cleanup() {
   rm -rf "$tmp"
-  [[ $installed == n && -n $recipient ]] || return 0
+  [[ $installed == n && $generated == y ]] || return 0
   echo >&2
   echo "backfabric-install: not installed; the generated private keys are deleted." >&2
   if [[ -e $hostPub ]]; then
     echo "Unless $host was installed nevertheless, delete $hostPub and $initrdPub." >&2
+    echo "The next install replaces the key of $host in .sops.yaml, if any." >&2
   fi
-  echo "Remove $recipient from .sops.yaml if you added it, and run sops updatekeys." >&2
 }
 trap cleanup EXIT
 
@@ -137,32 +139,9 @@ install -d -m 755 "$extraFiles/etc/ssh"
 ssh-keygen -q -t ed25519 -N "" -C "$host" -f "$extraFiles/etc/ssh/ssh_host_ed25519_key"
 install -d -m 700 "$extraFiles$(dirname "$initrdHostKey")"
 ssh-keygen -q -t ed25519 -N "" -C "$host-initrd" -f "$extraFiles$initrdHostKey"
+generated=y
 
-# --- 3. sops ------------------------------------------------------------------
-
-recipient=$(ssh-to-age <"$extraFiles/etc/ssh/ssh_host_ed25519_key.pub")
-echo
-echo "Age recipient of $host: $recipient"
-if [[ -f .sops.yaml ]]; then
-  echo "Add it to the creation_rules of .sops.yaml for every file $host needs (docs/secrets.md)."
-  until grep -qF -- "$recipient" .sops.yaml; do
-    read -r -p "Press Enter when $recipient is in .sops.yaml. "
-  done
-  # Prefilter: every sops-encrypted file contains "sops" (its metadata).
-  mapfile -d '' candidates < <(git grep -lz -e sops -- . || true)
-  updated=0
-  for file in "${candidates[@]}"; do
-    if [[ $(sops filestatus "$file" 2>/dev/null | jq -r .encrypted) == true ]]; then
-      sops updatekeys -y "$file"
-      updated=$((updated + 1))
-    fi
-  done
-  ((updated > 0)) || echo "No sops-encrypted files; nothing to update."
-else
-  echo "No .sops.yaml; add the recipient when the host gets secrets (docs/secrets.md)."
-fi
-
-# --- 4. LUKS passphrase -------------------------------------------------------
+# --- 3. LUKS passphrase -------------------------------------------------------
 
 echo
 read -r -s -p "LUKS passphrase for the disks of $host: " passphrase
@@ -176,6 +155,24 @@ echo
   printf '%s' "$passphrase" >"$tmp/disk-encryption.key"
 )
 unset passphrase repeated
+
+# --- 4. Public keys and sops --------------------------------------------------
+
+# A flake in a git repository only sees files in the index; intent-to-add
+# makes the new files visible without staging their content.
+mkdir -p "$hostDir"
+cp "$extraFiles/etc/ssh/ssh_host_ed25519_key.pub" "$hostPub"
+cp "$extraFiles$initrdHostKey.pub" "$initrdPub"
+git add --intent-to-add -- "$hostPub" "$initrdPub"
+
+# The new host key replaces any old one: existing .pub files stopped the
+# command above, so a reinstall is deliberate.
+if [[ -f .sops.yaml ]]; then
+  echo
+  backfabric-sops-add-host --replace "$host"
+else
+  echo "No .sops.yaml; add $host with backfabric-sops-add-host once it exists (docs/secrets.md)."
+fi
 
 # --- 5. Install ---------------------------------------------------------------
 
