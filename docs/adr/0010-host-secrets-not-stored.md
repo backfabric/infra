@@ -1,0 +1,3 @@
+# Host keys and LUKS passphrase are not stored in the repository
+
+`backfabric keygen` generates a host's SSH host key, initrd host key, and LUKS passphrase into a local state directory outside the repository; only the public keys are committed. `backfabric finalize` deletes the directory after the operator moved the passphrase into their password manager, so the private host keys then exist only on the host. Storing them in sops would keep the host identity across reinstalls, but would put the most valuable secret (the passphrase) behind the same admin key as everything else and in the git history forever; a reinstall simply generates new keys (`sops add-host --replace`).
