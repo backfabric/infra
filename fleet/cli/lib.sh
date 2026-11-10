@@ -71,10 +71,17 @@ state_dir() {
   echo "${XDG_STATE_HOME:-$HOME/.local/state}/backfabric/$1"
 }
 
-# The fleet shell's `ssh` knows the hosts (aliases, ports, host keys).
-require_fleet_shell() {
-  [[ ${BACKFABRIC_FLEET_SHELL-} == 1 ]] ||
-    die "run inside the fleet dev shell (nix develop in the private repository), whose ssh knows $host and $host-initrd"
+# require_fleet_ssh <alias>: fails unless ssh resolves <alias> through the
+# fleet dev shell's config: the shell exports PROJECT_SSH_CONFIG, and
+# ~/.ssh/config includes it (`Include ${PROJECT_SSH_CONFIG}` as its first
+# line; see docs/fleet-shell.md).
+require_fleet_ssh() {
+  [[ -n ${PROJECT_SSH_CONFIG-} ]] ||
+    die "run inside the fleet dev shell (nix develop in the private repository), which sets PROJECT_SSH_CONFIG"
+  local resolved
+  resolved=$(ssh -G "$1" 2>/dev/null) || resolved=
+  grep -Fqxi "hostkeyalias $1" <<<"$resolved" ||
+    die "ssh does not use the fleet config for $1; add 'Include \${PROJECT_SSH_CONFIG}' as the first line of ~/.ssh/config (docs/fleet-shell.md)"
 }
 
 # use_pinned_ssh <known_hosts>: puts an ssh first in PATH, for this command

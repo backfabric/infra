@@ -16,6 +16,19 @@ secrets.
   where you like. For example an age key:
   `nix shell nixpkgs#age -c age-keygen -o ~/.config/sops/age/fleet.txt`.
   Tell sops where it is in the `shellHook` in `flake.nix`.
+- This line as the FIRST line of `~/.ssh/config`, once per machine:
+
+  ```
+  Include ${PROJECT_SSH_CONFIG}
+  ```
+
+  The dev shell exports `PROJECT_SSH_CONFIG`, the generated SSH config of
+  the fleet; outside the shell the variable is unset and ssh skips the
+  line. It must come first because ssh keeps the first value of each
+  option, so the fleet's user, ports, and host key checking win over your
+  own `Host *` settings. Without it, `node1` is an ordinary host name,
+  checked against your personal known_hosts; see
+  [the fleet dev shell](https://github.com/backfabric/infra/blob/main/docs/fleet-shell.md#one-time-setup-of-sshconfig).
 
 ## Create the repository
 
@@ -30,9 +43,10 @@ git commit -m "chore: initial fleet repository"
 A flake in a git repository only sees files known to git: `git add` every new
 file before running a command.
 
-`nix develop` enters the fleet dev shell: `ssh`, `nixos-rebuild`,
-`nixos-anywhere`, `sops`, and the `backfabric` command, which know every host
-in `nixosConfigurations`. Create `.sops.yaml` with your admin key(s), once:
+`nix develop` enters the fleet dev shell: `nixos-rebuild`, `nixos-anywhere`,
+`sops`, and the `backfabric` command, and `PROJECT_SSH_CONFIG`, through
+which `ssh`, `scp`, `nix copy`, and the rest know every host in
+`nixosConfigurations`. Create `.sops.yaml` with your admin key(s), once:
 
 ```sh
 nix develop
