@@ -103,12 +103,15 @@ nix flake init -t github:backfabric/infra
   traefik, servicelb, metrics-server, and local-storage disabled, the other
   system images from the package's airgap archive; Secrets encrypted at
   rest with `secretbox`; etcd snapshots with k3s's defaults (every 12 hours,
-  the last 5, in `/var/lib/rancher/k3s/server/db/snapshots`). Nothing in
-  the cluster is reachable from outside: the firewall opens port 6443 only
-  on `cni0`, for pods; NodePorts answer only on 127.0.0.0/8; Services with
-  externalIPs are rejected; Pod Security Admission enforces `baseline`
-  (audit and warn `restricted`) outside kube-system. Every API request is
-  audited at level Metadata to `/var/log/kubernetes/audit.log`. See
+  the last 5, in `/var/lib/rancher/k3s/server/db/snapshots`). Hardened as
+  the [K3s CIS hardening guide](https://docs.k3s.io/security/hardening-guide)
+  says: `protect-kernel-defaults` with its kernel parameters, Pod Security
+  Admission `restricted` outside kube-system, EventRateLimit, every API
+  request audited at level Metadata to
+  `/var/lib/rancher/k3s/server/logs/audit.log`. Nothing in the cluster is
+  reachable from outside: the firewall opens port 6443 only on `cni0`, for
+  pods; Services with externalIPs, and of type NodePort or LoadBalancer, are
+  rejected. Deviations from the guide:
   [ADR 0017](docs/adr/0017-cluster-hardening-defaults.md). Run `kubectl` on
   the host as root (`ssh <host>`, then `kubectl get nodes`).
   `backfabric.k3s.package` (default `pkgs.k3s_1_35`) pins the k3s minor
