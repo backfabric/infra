@@ -56,9 +56,11 @@ in the same PR.
   --all-systems` (CI runs the same, evaluation only).
 - The development machine is aarch64-darwin without a Linux builder:
   x86_64-linux configurations can only be evaluated. aarch64-darwin outputs
-  (the `backfabric` package, `devShells.<system>.example-fleet`) can be built
-  and run; exercise CLI changes in a mock private repository created with
-  `nix flake init -t`, with stubs for the server side.
-- The PR body states what was verified and what still needs a real server.
+  (the `backfabric` package, `devShells.<system>.example-fleet`) can be built,
+  so shellcheck runs on CLI changes.
+- Behaviour is verified by the user in their real private repository on
+  real servers. The PR body states what was checked here, and ends with the
+  steps to run there: the commit to pin, the commands, and what each should
+  show.
 - When user-facing behaviour changes, update the matching runbook in `docs/`,
   the README, and `templates/default/README.md`.
