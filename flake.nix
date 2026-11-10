@@ -73,6 +73,28 @@
         nixpkgs.legacyPackages.x86_64-linux.writeText name (
           builtins.toJSON (removeAttrs facts [ "reportPath" ])
         );
+
+      # The dev shell of every system the template declares, evaluated with
+      # this repository as `backfabric` and the given hosts in place of the
+      # template's (empty) `nixosConfigurations`.
+      templateCheck =
+        name: hosts:
+        let
+          template = import ./templates/default/flake.nix;
+          outputs = template.outputs {
+            self = outputs // {
+              nixosConfigurations = hosts;
+            };
+            inherit nixpkgs;
+            backfabric = self;
+          };
+        in
+        assert outputs.nixosConfigurations == { };
+        nixpkgs.legacyPackages.x86_64-linux.writeText name (
+          builtins.unsafeDiscardStringContext (
+            builtins.toJSON (lib.mapAttrs (_: shells: shells.default.drvPath) outputs.devShells)
+          )
+        );
     in
     {
       nixosModules = subsystems // {
@@ -114,6 +136,22 @@
         fleet-facts-without-report = fleetFacts "fleet-facts-without-report" exampleWithoutReport (
           lib.hasSuffix "/examples/single-node/facter.json"
         );
+        # The template right after `nix flake init`, and with the example host
+        # (built as the template's `mkHost` builds a host; its toplevel is
+        # `example-single-node`).
+        template-empty = templateCheck "template-empty" { };
+        template-with-host = templateCheck "template-with-host" { node1 = exampleSingleNode; };
+      };
+
+      templates.default = {
+        path = ./templates/default;
+        description = "Private fleet repository: hosts and secrets using these modules";
+        welcomeText = ''
+          # Private fleet repository
+
+          Next: `git init && git add -A && git commit`, then follow README.md
+          (sops init, add a host, install).
+        '';
       };
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt-tree);
