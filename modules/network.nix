@@ -82,6 +82,9 @@ in
   };
 
   config = {
+    # nixos-facter reports contain no MAC addresses, so `macAddress` cannot
+    # be checked here; `backfabric probe` and `backfabric install` check it
+    # on the server, and that its driver is in the initrd.
     assertions = [
       {
         assertion =
@@ -90,7 +93,8 @@ in
         message = ''
           backfabric.network: no network driver for the initrd, so the disks
           could not be unlocked over SSH. Set hardware.facter.reportPath to the
-          host's nixos-facter report.
+          host's nixos-facter report (backfabric probe writes it); its
+          hardware.network_controller entries must list driver_modules.
         '';
       }
     ];
