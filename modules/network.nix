@@ -7,6 +7,11 @@
 # dedicated servers: the main IPv4 comes from a larger subnet, but the server
 # may only talk to its gateway.
 #
+# IPv4 only (docs/adr/0016-ipv4-only-hosts.md): IPv6 is disabled in the
+# booted system (`networking.enableIPv6`), and the uplink gets no IPv6
+# address, not even link-local, in both stages (the sysctl does not reach
+# the initrd).
+#
 # The NIC kernel module for the initrd comes from nixos-facter
 # (`hardware.facter` in nixpkgs): with a report and initrd networking enabled,
 # it adds the drivers of the detected network controllers to
@@ -23,11 +28,11 @@ let
         Peer = "${cfg.ipv4.gateway}/32";
       }
     ];
-    address = [ cfg.ipv6.address ];
-    gateway = [
-      cfg.ipv4.gateway
-      cfg.ipv6.gateway
-    ];
+    gateway = [ cfg.ipv4.gateway ];
+    networkConfig = {
+      LinkLocalAddressing = "no";
+      IPv6AcceptRA = false;
+    };
     dns = cfg.nameservers;
   };
 in
@@ -52,27 +57,12 @@ in
       };
     };
 
-    ipv6 = {
-      address = lib.mkOption {
-        type = lib.types.strMatching ".+/64";
-        example = "2001:db8::2/64";
-        description = "IPv6 address from the server's /64 subnet, with prefix length.";
-      };
-      gateway = lib.mkOption {
-        type = lib.types.str;
-        default = "fe80::1";
-        description = "IPv6 gateway; Hetzner uses the link-local address fe80::1.";
-      };
-    };
-
     nameservers = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       # https://docs.hetzner.com/robot/dedicated-server/general-information/recursive-name-servers/
       default = [
         "185.12.64.1"
         "185.12.64.2"
-        "2a01:4ff:ff00::add:1"
-        "2a01:4ff:ff00::add:2"
       ];
       description = ''
         Recursive DNS servers. The default are Hetzner's resolvers, which only
@@ -101,6 +91,7 @@ in
 
     networking.useNetworkd = true;
     networking.useDHCP = false;
+    networking.enableIPv6 = false;
     systemd.network.networks."10-uplink" = uplink;
 
     # With a report, facter enables DHCP on every detected interface.
