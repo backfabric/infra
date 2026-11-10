@@ -67,14 +67,8 @@ written by the install command:
   `nixos-anywhere` (whose own openssh comes last in its `PATH`, after the
   operator's).
 - `nixos-anywhere`, `nixos-rebuild` (nixos-rebuild-ng, also on macOS),
-  `sops`, `ssh-to-age`, and the commands of this repository:
-  - `backfabric-install <host>`: installs a host, see below;
-  - `backfabric-sops-init --age <recipient> --pgp <fingerprint> ...`: creates
-    `.sops.yaml` with the admin keys, once;
-  - `backfabric-sops-add-host [--replace] <host>`: adds a host's age
-    recipient to `.sops.yaml` and re-encrypts its files.
-
-  The sops commands are described in [secrets.md](secrets.md).
+  `sops`, `ssh-to-age`, and `backfabric`, the command of this repository
+  (see [below](#the-backfabric-command)).
 
 The generated config defines per host:
 
@@ -121,6 +115,30 @@ nixos-rebuild switch --flake .#node1 --target-host node1 --build-host node1
 A host's key changes only when it is reinstalled; re-enter the shell after
 committing the new `.pub` files.
 
+## The `backfabric` command
+
+`backfabric` has one subcommand per task, in the order a new fleet needs
+them (`backfabric help`):
+
+- `backfabric sops init (--age <recipient> | --pgp <fingerprint>)...`: creates
+  `.sops.yaml` with the admin keys, once; see [secrets.md](secrets.md).
+- `backfabric install <host>`: installs a host from the Hetzner Rescue
+  system; see [below](#installing-a-host).
+- `backfabric sops add-host [--replace] <host>`: adds a host to `.sops.yaml`
+  and re-encrypts its files; see [secrets.md](secrets.md).
+- `backfabric help [<command>]`: shows this list, or the help of a command
+  (e.g. `backfabric help sops add-host`). Every command also takes `-h` and
+  `--help`.
+
+Run it from the root of the private repository. Until a host has its facter
+report and public keys, its configuration cannot be fully evaluated, and
+neither can the dev shell. Then run `backfabric` without the shell, from the
+private repository's pinned input (named `backfabric` here):
+
+```sh
+nix run --inputs-from . backfabric -- <command> [<argument>...]
+```
+
 ## Installing a host
 
 Boot the server into the Hetzner Rescue system with your SSH key, write the
@@ -129,17 +147,12 @@ the two `publicKey` options as above), and run from the root of the private
 repository:
 
 ```sh
-backfabric-install node1
+backfabric install node1
 ```
 
-Until a host has its report and public keys, its configuration cannot be
-fully evaluated, and neither can the dev shell. For a new host, run the
-install command without the shell, from the same pinned input (named
-`backfabric` here):
-
-```sh
-nix run --inputs-from . backfabric#backfabric-install -- node1
-```
+For a new host, the dev shell cannot be evaluated yet; run it as
+`nix run --inputs-from . backfabric -- install node1` (see
+[above](#the-backfabric-command)).
 
 The command:
 
@@ -161,7 +174,7 @@ The command:
    `--disk-encryption-keys /tmp/disk-encryption.key`.
 5. Writes `ssh_host_ed25519_key.pub` and `initrd_ssh_host_ed25519_key.pub`
    into the directory of the facter report. If `.sops.yaml` exists, runs
-   `backfabric-sops-add-host --replace node1`, which adds the host's age
+   `backfabric sops add-host --replace node1`, which adds the host's age
    recipient (or replaces the one of an earlier install) and runs
    `sops updatekeys` on `secrets/common.yaml` and `secrets/node1.yaml` (needs
    an admin key; see [secrets.md](secrets.md)).

@@ -20,10 +20,10 @@ Status: work in progress.
 - `nixosModules.default` imports every subsystem module.
 - `fleet/`: the fleet dev shell for the operator machine,
   `lib.mkFleetShell { pkgs, nixosConfigurations }`, with a generated SSH
-  config, the install command `backfabric-install`, and the `.sops.yaml`
-  commands `backfabric-sops-init` and `backfabric-sops-add-host` (each also
-  `packages.<system>.<command>`), see [docs/fleet-shell.md](docs/fleet-shell.md)
-  and [docs/secrets.md](docs/secrets.md).
+  config and the operator command `backfabric` (`fleet/cli/`; subcommands
+  `sops init`, `install`, `sops add-host`; also `packages.<system>.backfabric`,
+  the default package), see [docs/fleet-shell.md](docs/fleet-shell.md) and
+  [docs/secrets.md](docs/secrets.md).
 - `examples/single-node/`: an example host with two disks, evaluated by
   `checks.x86_64-linux.example-single-node`, and with one disk by
   `checks.x86_64-linux.example-single-disk`; its fleet dev shell is

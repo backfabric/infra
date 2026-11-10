@@ -30,17 +30,17 @@ created once, with the admin keys, and the fleet dev shell adds the hosts to
 it:
 
 ```sh
-backfabric-sops-init --age age1... --pgp 0123456789ABCDEF0123456789ABCDEF01234567
-backfabric-sops-add-host node1
-backfabric-sops-add-host node2
+backfabric sops init --age age1... --pgp 0123456789ABCDEF0123456789ABCDEF01234567
+backfabric sops add-host node1
+backfabric sops add-host node2
 ```
 
-`backfabric-sops-init` takes any number of `--age <recipient>` and
+`backfabric sops init` takes any number of `--age <recipient>` and
 `--pgp <fingerprint>` (40 hex digits, no spaces), at least one, and refuses
 to overwrite an existing `.sops.yaml`. The result, after adding two hosts:
 
 ```yaml
-# sops configuration, created by backfabric-sops-init. backfabric-sops-add-host
+# sops configuration, created by backfabric sops init. backfabric sops add-host
 # maintains the hosts: the keys host_<host>, the rules for secrets/<host>.yaml,
 # and the hosts in the rule for secrets/common.yaml. The admin keys (admin_<n>)
 # may be edited by hand; a new admin key belongs in every rule.
@@ -77,7 +77,7 @@ creation_rules:
 Every key is a YAML anchor, and the rules refer to it with aliases, so a key
 is written once. The admin keys may be edited by hand, comments included: add
 a new admin as `&admin_<n>` under `keys` and as `*admin_<n>` in every rule,
-then run `sops updatekeys` on every file. `backfabric-sops-add-host` keeps
+then run `sops updatekeys` on every file. `backfabric sops add-host` keeps
 such edits.
 
 ### Admin keys
@@ -106,7 +106,7 @@ devShells.aarch64-darwin.default =
 ## Adding a host
 
 ```sh
-backfabric-sops-add-host node1
+backfabric sops add-host node1
 ```
 
 run from the root of the private repository:
@@ -129,7 +129,7 @@ nothing. If it is there with another key, the command refuses; with
 `--replace` it replaces the value of `&host_node1`, which every rule refers to,
 and re-encrypts the files as above.
 
-`backfabric-install` runs `backfabric-sops-add-host --replace <host>` after
+`backfabric install` runs `backfabric sops add-host --replace <host>` after
 writing the host's `.pub` files, if `.sops.yaml` exists. Host names may
 contain letters, digits, `-` and `_`; `common` is reserved.
 
@@ -138,8 +138,8 @@ commands also run on their own, from the private repository's pinned input
 (named `backfabric` here):
 
 ```sh
-nix run --inputs-from . backfabric#backfabric-sops-init -- --age age1...
-nix run --inputs-from . backfabric#backfabric-sops-add-host -- node1
+nix run --inputs-from . backfabric -- sops init --age age1...
+nix run --inputs-from . backfabric -- sops add-host node1
 ```
 
 Commit `.sops.yaml` and the re-encrypted files before deploying the host.
@@ -149,7 +149,7 @@ Commit `.sops.yaml` and the re-encrypted files before deploying the host.
 1. Generate the new key pair locally, outside the repository:
    `ssh-keygen -t ed25519 -N "" -C node1 -f <dir>/ssh_host_ed25519_key`.
 2. Replace the host's `ssh_host_ed25519_key.pub` in the private repository
-   with the new public key and run `backfabric-sops-add-host --replace node1`.
+   with the new public key and run `backfabric sops add-host --replace node1`.
    The host cannot decrypt the re-encrypted files yet, but it only reads them
    at the next deployment.
 3. From the dev shell you are in (it still knows the old host key), install
@@ -170,7 +170,7 @@ replaces the host's key in `.sops.yaml` itself.
 Without its host key the host cannot decrypt anything: sops-nix cannot
 install the declared secrets, and the services that need them fail. The
 secrets are not lost: the admins can still decrypt them. Generate a new host
-key, replace the host's `.pub` file, run `backfabric-sops-add-host --replace
+key, replace the host's `.pub` file, run `backfabric sops add-host --replace
 <host>`, copy the new key to the host (for example from the Hetzner Rescue
 system after unlocking the disks), and deploy again. If the key may have
 leaked rather than been lost, follow the last paragraph of the previous

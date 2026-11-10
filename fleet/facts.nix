@@ -1,6 +1,6 @@
-# Facts the install and sops commands need, from a `nixosConfigurations.<host>`
+# Facts the backfabric command needs, from a `nixosConfigurations.<host>`
 # entry that may not be installable yet: its nixos-facter report and public key
-# files may be missing. Each command reads only the attributes it needs;
+# files may be missing. Each subcommand reads only the attributes it needs;
 # `hostPublicKey` requires the host's public key file.
 #
 # Any access to `config` first runs the module system's check for

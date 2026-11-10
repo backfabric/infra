@@ -59,7 +59,7 @@
         ];
       };
 
-      # The facts the install and sops commands read (fleet/facts.nix), as an
+      # The facts the backfabric command reads (fleet/facts.nix), as an
       # evaluation-only check.
       fleetFacts =
         name: system: reportPathOk:
@@ -83,13 +83,18 @@
 
       lib.mkFleetShell = import ./fleet/shell.nix;
 
-      # The install and sops commands on their own, for a host whose public
+      # The operator command `backfabric` on its own, for a host whose public
       # keys do not exist yet (see docs/fleet-shell.md).
-      packages = forAllSystems (pkgs: {
-        backfabric-install = pkgs.callPackage ./fleet/install.nix { };
-        backfabric-sops-init = pkgs.callPackage ./fleet/sops-init.nix { };
-        backfabric-sops-add-host = pkgs.callPackage ./fleet/sops-add-host.nix { };
-      });
+      packages = forAllSystems (
+        pkgs:
+        let
+          backfabric = pkgs.callPackage ./fleet/cli { };
+        in
+        {
+          inherit backfabric;
+          default = backfabric;
+        }
+      );
 
       # Evaluated by `nix flake check --no-build`, like the checks.
       devShells = forAllSystems (pkgs: {
