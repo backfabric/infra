@@ -136,8 +136,11 @@ Examples:
 ssh node1                     # booted system
 ssh node1-initrd              # initrd, to unlock the disks
 nix copy --to ssh-ng://node1 /nix/store/...
-# macOS cannot build the x86_64-linux system: build on the host itself.
-nixos-rebuild switch --flake .#node1 --target-host node1 --build-host node1
+# The operator machine only evaluates; the host builds (--build-host).
+# --no-reexec: otherwise nixos-rebuild first builds the new configuration's
+# own x86_64-linux nixos-rebuild locally, which macOS cannot.
+nixos-rebuild switch --flake .#node1 --target-host node1 --build-host node1 \
+  --no-reexec --use-substitutes
 ```
 
 A host's key changes only when it is reinstalled; re-enter the shell after
