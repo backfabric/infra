@@ -1,10 +1,26 @@
 # Secrets with sops-nix (imported by the registry entry), decrypted with the
 # SSH ed25519 host key of the booted system. See docs/secrets.md.
 #
-# No options of its own: the private repository sets `sops.defaultSopsFile`,
-# and other subsystems declare their own `sops.secrets.*`.
+# The private repository sets `sops.defaultSopsFile` for the host's own
+# secrets and `backfabric.secrets.commonFile` for the cluster-wide ones;
+# other subsystems declare their own `sops.secrets.*`.
+{ lib, ... }:
 {
-  sops = {
+  options.backfabric.secrets = {
+    commonFile = lib.mkOption {
+      type = lib.types.path;
+      example = lib.literalExpression "./secrets/common.yaml";
+      description = ''
+        The sops file with the secrets every host of the cluster shares,
+        `secrets/common.yaml` of the private repository (encrypted for every
+        host by `backfabric sops add-host`). Subsystems read their cluster-wide
+        secrets from it, e.g. `k3s-token`. `backfabric keygen` creates it and
+        adds missing cluster-wide secrets.
+      '';
+    };
+  };
+
+  config.sops = {
     # A string, not a Nix path, so that the key is never copied into the Nix
     # store. sops-nix converts it to an age identity with ssh-to-age. The key
     # is generated at install time and copied with nixos-anywhere

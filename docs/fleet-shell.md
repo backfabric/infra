@@ -53,6 +53,7 @@ OpenSSH expands environment variables in `Include` paths (ssh_config(5),
       nixosConfigurations.node1 = nixpkgs.lib.nixosSystem {
         modules = [
           backfabric.nixosModules.default
+          { backfabric.secrets.commonFile = ./secrets/common.yaml; }
           ./hosts/node1
         ];
       };
@@ -154,7 +155,9 @@ host need them (`backfabric help`):
 
 - `backfabric sops init (--age <recipient> | --pgp <fingerprint>)...`: creates
   `.sops.yaml` with the admin keys, once; see [secrets.md](secrets.md).
-- `backfabric keygen <host>`: generates the host's keys and LUKS passphrase.
+- `backfabric keygen [<host>]`: generates the host's keys and LUKS
+  passphrase, and the cluster-wide secrets missing from
+  `secrets/common.yaml` (without `<host>`, only those).
 - `backfabric sops add-host [--replace] <host>`: adds a host to `.sops.yaml`
   and re-encrypts its files; see [secrets.md](secrets.md).
 - `backfabric probe <host>`: boots the server into the NixOS installer and
@@ -193,8 +196,8 @@ can be run again after a failure; none waits for a reboot.
 
 | Step | Command | Where | Does |
 | ---- | ------- | ----- | ---- |
-| 1 | `backfabric keygen node1` | locally (`nix run`, see above) | host key, initrd host key and LUKS passphrase into the state directory; `.pub` files into the repository |
-| 2 | `backfabric sops add-host node1` | dev shell | the host's age recipient into `.sops.yaml` (skip without `.sops.yaml`) |
+| 1 | `backfabric keygen node1` | locally (`nix run`, see above) | host key, initrd host key and LUKS passphrase into the state directory; `.pub` files into the repository; `secrets/common.yaml` with the k3s token if missing |
+| 2 | `backfabric sops add-host node1` | dev shell | the host's age recipient into `.sops.yaml`, `secrets/common.yaml` re-encrypted for it |
 | 3 | `backfabric probe node1` | server in the Hetzner Rescue system | pins the host key, kexec into the NixOS installer, facter report, hardware summary, evaluation, uplink check |
 | 4 | commit | | the report, after reviewing it, and the host's other new files |
 | 5 | `backfabric install node1` | server in the installer | disks, NixOS, reboot (ERASES ALL DISKS) |
@@ -226,12 +229,29 @@ the host's `.pub` files exist.
 
 Evaluates only `backfabric.access.initrdSsh.hostKey` and
 `hardware.facter.reportPath` of the host (`nix/fleet/facts.nix`; the report and
-the `.pub` files may be missing), generates both ed25519 keys and the
+the `.pub` files may be missing), and refuses as above. Then it makes sure
+the cluster-wide secrets exist (below), generates both ed25519 keys and the
 passphrase into the state directory, and writes `ssh_host_ed25519_key.pub`
 and `initrd_ssh_host_ed25519_key.pub` into the directory of the facter
 report. New files are added to git with `--intent-to-add`: a flake in a git
 repository only sees files in the index, and this makes them visible without
 staging their content.
+
+Cluster-wide secrets: if `.sops.yaml` exists, every secret of
+`secrets/common.yaml` (today the k3s token, `k3s-token`) that is missing is
+generated; existing values are never changed. A missing file is created,
+encrypted for the keys of its rule in `.sops.yaml`, which needs no admin
+key; adding to an existing file needs one (sops finds it as usual, e.g.
+through `SOPS_AGE_KEY_FILE`, which `nix run` outside the dev shell may not
+have). This step runs before the host's keys are generated, so a failure
+leaves nothing that would refuse the next run. Without a host,
+`backfabric keygen` does only this step: for hosts that are already
+installed, e.g. after an update of this repository adds a cluster-wide
+secret. See [secrets.md](secrets.md#cluster-wide-secrets).
+
+A host's configuration only evaluates once `secrets/common.yaml` exists
+(the `k3s` subsystem reads its token from it), so `.sops.yaml` is needed
+before `probe`.
 
 ### probe
 
@@ -290,7 +310,8 @@ commit.
 
 | Failure | Re-run |
 | ------- | ------ |
-| `keygen` refuses: keys or `.pub` files exist | To start over, delete the state directory and both `.pub` files, then `keygen` and `sops add-host --replace` |
+| `keygen` refuses: keys or `.pub` files exist | To start over, delete the state directory and both `.pub` files, then `keygen` and `sops add-host --replace`. For the cluster-wide secrets of an installed host, run `keygen` without a host |
+| `keygen`: sops cannot add a secret to `secrets/common.yaml` | Make an admin key available to sops (e.g. run it in the dev shell); `keygen` again |
 | `probe` cannot connect, or the host key differs after Rescue was activated again | Activate Rescue, reset the server; if the Robot shows new fingerprints, delete `known_hosts` in the state directory; `probe` |
 | `probe`: evaluation fails or the uplink check fails | Fix the configuration from the summary; `probe` (the server stays in the installer) |
 | `install` refuses: no keys | `keygen` |

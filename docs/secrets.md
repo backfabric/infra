@@ -15,13 +15,17 @@ the private repository and decrypted on the host by
   [fleet-shell.md](fleet-shell.md)). sshd uses the same key.
 - Admins decrypt and edit secrets with their own keys. Which kind of key
   (age, PGP, ...) and where it lives is the private repository's choice; the
-  commands here never create or look for admin keys. They only add and
-  replace host recipients.
+  commands here never create or look for admin keys (sops finds them). They
+  only add and replace host recipients and add missing cluster-wide secrets.
 - Two kinds of sops files: `secrets/common.yaml`, readable by every host, and
   `secrets/<host>.yaml`, readable by that host only. The private repository
-  sets `sops.defaultSopsFile` to one of them and `sops.secrets.<name>.sopsFile`
-  for secrets in the other. Subsystems declare the secrets they need as
-  `sops.secrets.<name>`. A host without secrets needs no sops file.
+  sets `backfabric.secrets.commonFile` to `secrets/common.yaml` for every
+  host (the template's `mkHost` does), and `sops.defaultSopsFile` to the
+  host's own file once it has one. Subsystems declare the secrets they need
+  as `sops.secrets.<name>`, cluster-wide ones with
+  `sopsFile = config.backfabric.secrets.commonFile`. Every host needs
+  `secrets/common.yaml`: it holds the k3s cluster token (see
+  [below](#cluster-wide-secrets)).
 
 ## `.sops.yaml`
 
@@ -144,6 +148,37 @@ nix run --inputs-from . backfabric -- sops init --age age1...
 ```
 
 Commit `.sops.yaml` and the re-encrypted files before deploying the host.
+
+## Cluster-wide secrets
+
+`secrets/common.yaml` holds the secrets every host shares. Today that is
+one:
+
+| Key | Used by | Value |
+| --- | ------- | ----- |
+| `k3s-token` | `k3s` subsystem, `services.k3s.tokenFile` (`/run/secrets/k3s-token`, root, mode 0400) | 32 random bytes, hex |
+
+`backfabric keygen` creates and fills it: with a host (`keygen node1`)
+before generating the host's keys, without one (`keygen`) on its own, for
+hosts that are already installed. It generates only the secrets that are
+missing and never changes an existing value:
+
+- No `.sops.yaml`: skipped, with a message.
+- No `secrets/common.yaml`: created with every secret, encrypted for the
+  keys of its rule in `.sops.yaml` (the admins and the hosts added so far).
+  This needs no admin key; the values go to sops on stdin and are never
+  written unencrypted. The file is added to git with `--intent-to-add`.
+- The file exists: the key names of a sops file are not encrypted, so the
+  command sees which secrets are missing without a key, and adds each with
+  `sops set --value-stdin`, which needs an admin key.
+
+Hosts added later get the file through `backfabric sops add-host`, which
+re-encrypts it for them.
+
+The k3s token must never change: k3s encrypts its bootstrap data in etcd
+with it, so a cluster, and an etcd snapshot restored on a new server, only
+works with the original token. Keep the file's history; changing the token
+means resetting the cluster.
 
 ## Rotating a host key
 

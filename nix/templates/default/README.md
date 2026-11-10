@@ -139,9 +139,12 @@ for details and what to re-run after which failure.
    nix run --inputs-from . backfabric -- keygen node1
    ```
 
-   From here on, work in the dev shell.
+   The first time, it also creates `secrets/common.yaml` with the k3s
+   cluster token (encrypted as `.sops.yaml` says; it never changes an
+   existing value). From here on, work in the dev shell.
 
-2. Add the host to `.sops.yaml`:
+2. Add the host to `.sops.yaml` (this re-encrypts `secrets/common.yaml` for
+   it):
 
    ```sh
    backfabric sops add-host node1
@@ -184,6 +187,38 @@ for details and what to re-run after which failure.
    ```sh
    backfabric finalize node1
    ```
+
+## The cluster
+
+Every host runs a k3s server that initializes its own cluster on embedded
+etcd; joining further nodes is not implemented yet, so a cluster is one
+host for now. The cluster token, `k3s-token` in `secrets/common.yaml`
+(read through `backfabric.secrets.commonFile`, set in `mkHost` in
+`flake.nix`), must never change: an etcd snapshot can only be restored
+with it. Keep it with the rest of this repository.
+
+The Kubernetes API is not reachable from outside. Use `kubectl` on the host:
+
+```sh
+ssh node1
+kubectl get nodes
+kubectl get pods -A
+```
+
+The k3s version is pinned to a minor release
+(`backfabric.k3s.package`, default `pkgs.k3s_1_35`), so `nix flake update`
+only brings patch releases. To upgrade, set the next minor version (one at
+a time) in the host's configuration, e.g.
+`backfabric.k3s.package = pkgs.k3s_1_36;` (with `pkgs` among the module
+arguments), and deploy.
+
+If the hosts were installed before the cluster-wide secrets existed, create
+them once in the dev shell (needs your admin key if `secrets/common.yaml`
+exists), then commit and deploy:
+
+```sh
+backfabric keygen
+```
 
 ## Unlock after a reboot
 

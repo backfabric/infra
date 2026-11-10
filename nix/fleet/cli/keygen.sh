@@ -1,9 +1,10 @@
 # backfabric keygen: generates the keys and the LUKS passphrase of a host
-# before its installation. See docs/fleet-shell.md.
+# before its installation, and the cluster-wide secrets that are missing.
+# See docs/fleet-shell.md.
 
 usage_keygen() {
   cat <<'EOF'
-Usage: backfabric keygen <host>
+Usage: backfabric keygen [<host>]
 
 Generates, locally, for nixosConfigurations.<host> of the flake in the
 current directory (the root of the private repository):
@@ -14,9 +15,77 @@ The private keys and the passphrase go into the host's state directory,
 until `backfabric finalize <host>` deletes it. The public keys are written
 next to the host's nixos-facter report (hardware.facter.reportPath):
 ssh_host_ed25519_key.pub and initrd_ssh_host_ed25519_key.pub.
-
 Refuses if the host already has keys in its state directory or .pub files.
+
+With or without <host> (then before the host's keys), it also makes sure
+that secrets/common.yaml, the sops file every host can read, has the
+cluster-wide secrets:
+  - k3s-token: the k3s cluster token (32 random bytes, hex).
+Generates only the missing ones and never changes an existing value. Creates
+the file if it does not exist, encrypted as .sops.yaml says; adding to an
+existing file needs an admin key. Skipped without .sops.yaml.
+
+Without <host>, only the cluster-wide secrets: for hosts that are already
+installed.
 EOF
+}
+
+# The cluster-wide secrets in secrets/common.yaml. Each is random, generated
+# by keygen if missing, and must never change afterwards (the k3s token is
+# needed to restore an etcd snapshot).
+clusterSecrets=(k3s-token)
+
+# ensure_cluster_secrets: adds the missing cluster-wide secrets to
+# secrets/common.yaml, creating the file if needed.
+ensure_cluster_secrets() {
+  local file=secrets/common.yaml name missing=() value
+  if [[ ! -f .sops.yaml ]]; then
+    echo "No .sops.yaml; once it exists (backfabric sops init), run backfabric keygen to create $file with the cluster-wide secrets."
+    return
+  fi
+
+  # Only the values of a sops file are encrypted, so the names can be read
+  # without a key.
+  for name in "${clusterSecrets[@]}"; do
+    if [[ ! -f $file ]] || [[ $(name=$name yq 'has(strenv(name))' "$file") != true ]]; then
+      missing+=("$name")
+    fi
+  done
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    echo "$file has every cluster-wide secret (${clusterSecrets[*]}); left unchanged."
+    return
+  fi
+
+  # Values go to sops on stdin (printf is a builtin), never as arguments or
+  # into an unencrypted file.
+  if [[ ! -f $file ]]; then
+    mkdir -p "$(dirname "$file")"
+    # Encrypting needs only the public keys in .sops.yaml.
+    for name in "${missing[@]}"; do
+      printf '%s: %s\n' "$name" "$(random_hex 32)"
+    done | sops encrypt --filename-override "$file" >"$file.new" || {
+      rm -f "$file.new"
+      die "cannot create $file with sops (see above); check the rule for $file in .sops.yaml"
+    }
+    mv "$file.new" "$file"
+    # See the public keys below.
+    git add --intent-to-add -- "$file"
+    echo "Created $file with ${missing[*]}, encrypted for the keys of its rule in .sops.yaml."
+  else
+    for name in "${missing[@]}"; do
+      value=$(random_hex 32)
+      printf '"%s"' "$value" | sops set --value-stdin "$file" "[\"$name\"]" ||
+        die "cannot add $name to $file; sops needs an admin key to edit it (docs/secrets.md)"
+      echo "Added $name to $file."
+    done
+    unset value
+  fi
+  echo "Commit $file; hosts read it at their next deployment."
+}
+
+# random_hex <bytes>: prints <bytes> random bytes from /dev/urandom in hex.
+random_hex() {
+  od -An -v -tx1 -N "$1" /dev/urandom | tr -d ' \n'
 }
 
 cmd_keygen() {
@@ -28,14 +97,20 @@ cmd_keygen() {
     exit 0
     ;;
   esac
-  if [[ $# -ne 1 ]]; then
+  if [[ $# -gt 1 ]]; then
     usage_keygen >&2
     exit 2
   fi
-  host=$1
+  host=${1-}
+
+  require_flake
+
+  if [[ -z $host ]]; then
+    ensure_cluster_secrets
+    exit 0
+  fi
 
   check_host_name "$host"
-  require_flake
   command -v ssh-keygen >/dev/null || die "no ssh-keygen in PATH"
   require_host "$host"
 
@@ -50,8 +125,12 @@ cmd_keygen() {
   # The state directory may already hold the pinned Rescue host key of an
   # earlier `backfabric probe`.
   for file in "$state/extra-files" "$state/luks" "$hostPub" "$initrdPub"; do
-    [[ ! -e $file ]] || die "$file exists. To start over with new keys, delete $state and both .pub files of $host ($hostPub, $initrdPub); a host that was installed with the old keys then needs a reinstall."
+    [[ ! -e $file ]] || die "$file exists. To start over with new keys, delete $state and both .pub files of $host ($hostPub, $initrdPub); a host that was installed with the old keys then needs a reinstall. For the cluster-wide secrets alone, run backfabric keygen without a host."
   done
+
+  # Before the host's keys: if it fails, the next run is not refused.
+  ensure_cluster_secrets
+  echo
 
   # --- Keys and passphrase ----------------------------------------------------
 

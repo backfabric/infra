@@ -3,7 +3,8 @@
 #   - sshd: root login with SSH keys only, on `ssh.port`;
 #   - initrd: sshd on `initrdSsh.port` with the same keys and a separate host
 #     key, to unlock the LUKS disks after a reboot (see docs/initrd-unlock.md);
-#   - firewall (nftables backend): inbound closed except `ssh.port`, no ping
+#   - firewall (nftables backend): inbound closed from outside except
+#     `ssh.port` (k3s opens its API port to pods only, on `cni0`), no ping
 #     replies. The initrd has no firewall.
 #
 # The public host keys are options so that the fleet dev shell (nix/fleet/) can
@@ -28,7 +29,7 @@ in
     ssh.port = lib.mkOption {
       type = lib.types.port;
       example = 2222;
-      description = "Port of the SSH daemon of the booted system; the only port open in the firewall.";
+      description = "Port of the SSH daemon of the booted system; the only port open to the outside in the firewall.";
     };
 
     hostKey.publicKey = lib.mkOption {

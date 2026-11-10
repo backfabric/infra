@@ -18,12 +18,14 @@
     let
       inherit (nixpkgs) lib;
 
-      # A host: the backfabric modules plus the host's directory.
+      # A host: the backfabric modules, the cluster-wide secrets (the k3s
+      # token; created by `backfabric keygen`), and the host's directory.
       mkHost =
         path:
         lib.nixosSystem {
           modules = [
             backfabric.nixosModules.default
+            { backfabric.secrets.commonFile = ./secrets/common.yaml; }
             path
           ];
         };
