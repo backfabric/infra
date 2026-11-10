@@ -28,11 +28,24 @@ Status: work in progress.
   `checks.x86_64-linux.example-single-node`, and with one disk by
   `checks.x86_64-linux.example-single-disk`; its fleet dev shell is
   `devShells.<system>.example-fleet`.
+- `templates/default/`: the skeleton of the private repository, see below;
+  evaluated by `checks.x86_64-linux.template-empty` and
+  `checks.x86_64-linux.template-with-host`.
 - `docs/`: operational runbooks:
   [the fleet dev shell and installing a host](docs/fleet-shell.md),
   [replacing a failed disk](docs/disk-replacement.md),
   [unlocking the disks over SSH](docs/initrd-unlock.md),
   [managing secrets](docs/secrets.md).
+
+## Private repository
+
+Create the private repository from the template, then follow its README
+(sops setup, adding and installing a host, unlocking, updating):
+
+```sh
+mkdir fleet && cd fleet
+nix flake init -t github:backfabric/infra
+```
 
 ## Subsystems
 
