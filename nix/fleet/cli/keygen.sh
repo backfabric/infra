@@ -22,21 +22,24 @@ that the cluster-wide secrets exist. In secrets/common.yaml, the sops file
 every host can read:
   - k3s-token: the k3s cluster token (32 random bytes, hex);
   - openbao-seal-key: OpenBao's static seal key (32 random bytes, hex);
-  - openbao-ca-cert: the CA of OpenBao's TLS certificate (ECDSA P-256,
-    10 years);
+  - openbao-ca-cert: the CA of the host services' TLS certificates (ECDSA
+    P-256, 10 years);
   - openbao-tls-key, openbao-tls-cert: OpenBao's TLS key and certificate
     (ECDSA P-256, 3 years) for openbao.openbao.svc,
-    openbao.openbao.svc.cluster.local and 127.0.0.1, signed by that CA.
+    openbao.openbao.svc.cluster.local and 127.0.0.1, signed by that CA;
+  - otel-tls-key, otel-tls-cert: the OpenTelemetry Collector's, for
+    otel-collector.otel.svc, otel-collector.otel.svc.cluster.local and
+    127.0.0.1, signed by that CA.
 In secrets/admin.yaml, the sops file of the admins only (its rule in
 .sops.yaml is added if missing):
   - openbao-ca-key: the CA's private key. An openbao-ca-key found in
     secrets/common.yaml (where earlier versions put it) is moved here.
 Generates only the missing ones and never changes an existing value; with
-the CA present and both openbao-tls-* missing, it issues a new server
-certificate (rotation, docs/openbao.md). Creates a file if it does not
-exist, encrypted as .sops.yaml says; adding to an existing file, issuing a
-certificate from an existing CA, and moving the CA key need an admin key.
-Skipped without .sops.yaml.
+the CA present and a service's key and certificate both missing, it issues
+a new server certificate for it (rotation, docs/openbao.md). Creates a file
+if it does not exist, encrypted as .sops.yaml says; adding to an existing
+file, issuing a certificate from an existing CA, and moving the CA key need
+an admin key. Skipped without .sops.yaml.
 
 Without <host>, only the cluster-wide secrets: for hosts that are already
 installed.
@@ -51,19 +54,24 @@ adminFile=secrets/admin.yaml
 # needed to restore an etcd snapshot, the seal key to unseal OpenBao).
 clusterSecrets=(k3s-token openbao-seal-key)
 
-# OpenBao's TLS material: the CA key in secrets/admin.yaml, the rest in
-# secrets/common.yaml.
-tlsServerSecrets=(openbao-tls-key openbao-tls-cert)
-# The name pods use (nix/modules/openbao.nix), and the loopback address for
-# clients on the host.
-tlsNames=DNS:openbao.openbao.svc,DNS:openbao.openbao.svc.cluster.local,IP:127.0.0.1
+# The TLS material of the host services: one CA, its key in
+# secrets/admin.yaml, its certificate in secrets/common.yaml, and for each
+# service <service>-tls-key and <service>-tls-cert in secrets/common.yaml.
+# The CA keeps OpenBao's name, which it had first.
+tlsServices=(openbao otel)
+# The names clients use (nix/modules/<service>.nix), and the loopback
+# address for clients on the host; the first is the certificate's subject.
+declare -A tlsNames=(
+  [openbao]="DNS:openbao.openbao.svc,DNS:openbao.openbao.svc.cluster.local,IP:127.0.0.1"
+  [otel]="DNS:otel-collector.otel.svc,DNS:otel-collector.otel.svc.cluster.local,IP:127.0.0.1"
+)
 tlsCaDays=3650
 tlsServerDays=1095
 
 # ensure_cluster_secrets: adds the missing cluster-wide secrets to
 # secrets/common.yaml and secrets/admin.yaml, creating the files if needed.
 ensure_cluster_secrets() {
-  local name caKey caCert commonNew=() adminNew=()
+  local name service caKey caCert missing=() commonNew=() adminNew=()
   # The values stay in this process's memory: they go to openssl and sops
   # through pipes (printf is a builtin), never as arguments or into an
   # unencrypted file.
@@ -85,9 +93,30 @@ ensure_cluster_secrets() {
     fi
   done
 
-  case "$(tls_state)" in
-  complete) ;;
+  case "$(ca_state)" in
+  complete)
+    for service in "${tlsServices[@]}"; do
+      case "$(server_state "$service")" in
+      complete) ;;
+      none) missing+=("$service") ;;
+      *)
+        die "the TLS secrets of $service are incomplete ($service-tls-key, $service-tls-cert in $commonFile). To issue a new server certificate, remove both (sops unset $commonFile '[\"<name>\"]'); see docs/openbao.md"
+        ;;
+      esac
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+      # Rotation or a new service: a server certificate from the existing CA.
+      caKey=$(sops decrypt --extract '["openbao-ca-key"]' "$adminFile") ||
+        die "cannot read openbao-ca-key from $adminFile; sops needs an admin key (docs/secrets.md)"
+      caCert=$(sops decrypt --extract '["openbao-ca-cert"]' "$commonFile") ||
+        die "cannot read openbao-ca-cert from $commonFile; sops needs an admin key (docs/secrets.md)"
+    fi
+    ;;
   none)
+    for service in "${tlsServices[@]}"; do
+      [[ $(server_state "$service") == none ]] ||
+        die "$service-tls-* exist in $commonFile without the CA (openbao-ca-key in $adminFile, openbao-ca-cert in $commonFile). To start over with a new CA, remove every TLS secret (sops unset <file> '[\"<name>\"]'); see docs/openbao.md"
+    done
     caKey=$(openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256)
     caCert=$(openssl req -new -x509 -key <(printf '%s\n' "$caKey") \
       -subj "/CN=OpenBao CA" -days "$tlsCaDays" \
@@ -95,23 +124,18 @@ ensure_cluster_secrets() {
       -addext keyUsage=critical,keyCertSign,cRLSign)
     values["openbao-ca-key"]=$caKey$'\n'
     values["openbao-ca-cert"]=$caCert$'\n'
-    issue_tls_cert "$caKey" "$caCert"
     adminNew+=(openbao-ca-key)
-    commonNew+=(openbao-ca-cert "${tlsServerSecrets[@]}")
-    ;;
-  ca)
-    # Rotation: a new server certificate from the existing CA.
-    caKey=$(sops decrypt --extract '["openbao-ca-key"]' "$adminFile") ||
-      die "cannot read openbao-ca-key from $adminFile; sops needs an admin key (docs/secrets.md)"
-    caCert=$(sops decrypt --extract '["openbao-ca-cert"]' "$commonFile") ||
-      die "cannot read openbao-ca-cert from $commonFile; sops needs an admin key (docs/secrets.md)"
-    issue_tls_cert "$caKey" "$caCert"
-    commonNew+=("${tlsServerSecrets[@]}")
+    commonNew+=(openbao-ca-cert)
+    missing=("${tlsServices[@]}")
     ;;
   *)
-    die "OpenBao's TLS secrets are incomplete (openbao-ca-key in $adminFile; openbao-ca-cert, ${tlsServerSecrets[*]} in $commonFile). To issue a new server certificate, remove both ${tlsServerSecrets[*]}; to start over with a new CA, remove all four (sops unset <file> '[\"<name>\"]'); see docs/openbao.md"
+    die "the TLS CA is incomplete (openbao-ca-key in $adminFile, openbao-ca-cert in $commonFile). To start over with a new CA, remove it and every <service>-tls-key and -cert (sops unset <file> '[\"<name>\"]'); see docs/openbao.md"
     ;;
   esac
+  for service in "${missing[@]}"; do
+    issue_tls_cert "$service" "$caKey" "$caCert"
+    commonNew+=("$service-tls-key" "$service-tls-cert")
+  done
   unset caKey
 
   if [[ ${#commonNew[@]} -eq 0 && ${#adminNew[@]} -eq 0 ]]; then
@@ -178,38 +202,48 @@ move_ca_key() {
   echo "Every host key could decrypt it in $commonFile, and the git history keeps it there: issue a new CA and certificate (docs/openbao.md#tls)."
 }
 
-# tls_state: which of OpenBao's TLS secrets exist: complete, none, ca (the
-# CA without the server certificate), or partial.
-tls_state() {
-  local name ca=0 server=0
-  ! has_secret "$adminFile" openbao-ca-key || ca=$((ca + 1))
-  ! has_secret "$commonFile" openbao-ca-cert || ca=$((ca + 1))
-  for name in "${tlsServerSecrets[@]}"; do
-    ! has_secret "$commonFile" "$name" || server=$((server + 1))
-  done
-  case "$ca$server" in
-  22) echo complete ;;
-  00) echo none ;;
-  20) echo ca ;;
+# ca_state: whether the TLS CA exists: complete, none or partial.
+ca_state() {
+  local count=0
+  ! has_secret "$adminFile" openbao-ca-key || count=$((count + 1))
+  ! has_secret "$commonFile" openbao-ca-cert || count=$((count + 1))
+  case $count in
+  2) echo complete ;;
+  0) echo none ;;
   *) echo partial ;;
   esac
 }
 
-# issue_tls_cert <CA key> <CA cert>: generates OpenBao's server key and a
-# certificate signed by the CA, into values[openbao-tls-key] and
-# values[openbao-tls-cert] of ensure_cluster_secrets.
+# server_state <service>: whether its TLS key and certificate exist:
+# complete, none or partial.
+server_state() {
+  local count=0
+  ! has_secret "$commonFile" "$1-tls-key" || count=$((count + 1))
+  ! has_secret "$commonFile" "$1-tls-cert" || count=$((count + 1))
+  case $count in
+  2) echo complete ;;
+  0) echo none ;;
+  *) echo partial ;;
+  esac
+}
+
+# issue_tls_cert <service> <CA key> <CA cert>: generates the service's
+# server key and a certificate signed by the CA, for its tlsNames, into
+# values[<service>-tls-key] and values[<service>-tls-cert] of
+# ensure_cluster_secrets.
 issue_tls_cert() {
-  local key cert
+  local key cert names=${tlsNames[$1]} subject
+  subject=${names%%,*}
   key=$(openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256)
-  cert=$(openssl req -new -key <(printf '%s\n' "$key") -subj /CN=openbao.openbao.svc \
+  cert=$(openssl req -new -key <(printf '%s\n' "$key") -subj "/CN=${subject#DNS:}" \
     -addext basicConstraints=critical,CA:FALSE \
     -addext keyUsage=critical,digitalSignature \
     -addext extendedKeyUsage=serverAuth \
-    -addext "subjectAltName=$tlsNames" |
-    openssl x509 -req -CA <(printf '%s\n' "$2") -CAkey <(printf '%s\n' "$1") \
+    -addext "subjectAltName=$names" |
+    openssl x509 -req -CA <(printf '%s\n' "$3") -CAkey <(printf '%s\n' "$2") \
       -days "$tlsServerDays" -copy_extensions copyall)
-  values["openbao-tls-key"]=$key$'\n'
-  values["openbao-tls-cert"]=$cert$'\n'
+  values["$1-tls-key"]=$key$'\n'
+  values["$1-tls-cert"]=$cert$'\n'
 }
 
 # random_hex <bytes>: prints <bytes> random bytes from /dev/urandom in hex.

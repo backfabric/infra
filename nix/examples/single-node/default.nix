@@ -32,7 +32,8 @@
   };
 
   # A real host reads the cluster-wide secrets (the k3s token, OpenBao's
-  # seal key and TLS material) from `secrets/common.yaml` of the private
+  # seal key and TLS material, the OpenTelemetry Collector's TLS material)
+  # from `secrets/common.yaml` of the private
   # repository (set once for every host, in the template's `mkHost`), and its
   # own from `secrets/<host>.yaml`, files encrypted for the host. The example
   # has no encrypted files, so the paths do not exist and sops-nix must not

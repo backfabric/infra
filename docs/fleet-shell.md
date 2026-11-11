@@ -240,7 +240,7 @@ repository only sees files in the index, and this makes them visible without
 staging their content.
 
 Cluster-wide secrets: if `.sops.yaml` exists, every secret of
-`secrets/common.yaml` (the k3s token, OpenBao's seal key, CA certificate and server certificate) and of `secrets/admin.yaml` (OpenBao's CA key; its rule in `.sops.yaml` is added if missing) that is missing is
+`secrets/common.yaml` (the k3s token, OpenBao's seal key, CA certificate and server certificate, the OpenTelemetry Collector's server certificate) and of `secrets/admin.yaml` (OpenBao's CA key; its rule in `.sops.yaml` is added if missing) that is missing is
 generated; existing values are never changed. A missing file is created,
 encrypted for the keys of its rule in `.sops.yaml`, which needs no admin
 key; adding to an existing file needs one (sops finds it as usual, e.g.
