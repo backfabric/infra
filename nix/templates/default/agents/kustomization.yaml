@@ -1,6 +1,8 @@
 # The agents' workloads, applied to the cluster by Flux (backfabric.flux,
 # path ./agents). List manifests or directories under `resources`; objects
-# removed from here are deleted from the cluster.
+# removed from here are deleted from the cluster. Allowed: Namespaces named
+# agent-*, and in them ServiceAccounts, ConfigMaps, Services, Deployments,
+# Jobs, CronJobs (README, "Agents").
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources: []

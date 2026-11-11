@@ -310,9 +310,18 @@ The agents' workloads are not part of the hosts' configuration: Flux in
 the cluster applies `agents/` of this repository (branch `main`), checking
 for new commits every minute (`backfabric.flux.interval`). List manifests
 or directories in `agents/kustomization.yaml`; what is removed from there
-is deleted from the cluster. Pods must meet Pod Security `restricted`
-(see [The cluster](#the-cluster)). Whoever can push to `main` controls the
-cluster.
+is deleted from the cluster.
+
+`agents/` is treated as untrusted: Flux applies it with an account that
+may only manage Namespaces named `agent-*` and, in them, ServiceAccounts,
+ConfigMaps, Services, Deployments, Jobs, and CronJobs. No Secrets (they
+come from OpenBao), RBAC, NetworkPolicies, quotas, volumes, bare Pods, or
+Flux objects, nothing outside `agent-*`, no remote bases in a
+`kustomization.yaml`, and the namespaces' Pod Security stays `restricted`
+(see [The cluster](#the-cluster)). A change that breaks one of these rules
+is not applied; `flux get kustomizations` shows the error. Agent
+namespaces have open egress and no quota for now. See
+[Flux](https://github.com/backfabric/infra/blob/main/docs/flux.md#what-the-synced-directory-may-do).
 
 Flux reads this repository with a fine-grained GitHub token that can only
 read it. Create it in GitHub, Settings, Developer settings, Personal access

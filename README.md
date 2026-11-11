@@ -147,7 +147,12 @@ nix flake init -t github:backfabric/infra
   `restricted`, Flux's network policies. A GitRepository and a
   Kustomization `flux-system/fleet` sync `backfabric.flux.repository.path`
   of `repository.url` (HTTPS) on `repository.branch` (default `main`),
-  fetched every `interval` (default `1m`), pruning what is removed. Flux
+  fetched every `interval` (default `1m`), pruning what is removed. That
+  directory is untrusted: the Kustomization impersonates
+  `flux-system/flux-agents`, allowed only Namespaces, ServiceAccounts,
+  ConfigMaps, Services, Deployments, Jobs, and CronJobs, and an admission
+  policy confines it to namespaces `agent-*` under Pod Security
+  `restricted`; the controllers run with Flux's lockdown flags. Flux
   authenticates with `flux-git-token` from `backfabric.secrets.commonFile`,
   a read-only fine-grained GitHub token the operator creates, rendered into
   a root-only file outside the Nix store. The `flux` CLI is on the host
