@@ -141,8 +141,9 @@ for details and what to re-run after which failure.
    nix run --inputs-from . backfabric -- keygen node1
    ```
 
-   The first time, it also creates `secrets/common.yaml` with the k3s
-   cluster token (encrypted as `.sops.yaml` says; it never changes an
+   The first time, it also creates `secrets/common.yaml` with the
+   cluster-wide secrets: the k3s cluster token, and OpenBao's seal key, CA
+   and TLS certificate (encrypted as `.sops.yaml` says; it never changes an
    existing value). From here on, work in the dev shell.
 
 2. Add the host to `.sops.yaml` (this re-encrypts `secrets/common.yaml` for
@@ -233,13 +234,55 @@ a time) in the host's configuration, e.g.
 `backfabric.k3s.package = pkgs.k3s_1_36;` (with `pkgs` among the module
 arguments), and deploy.
 
-If the hosts were installed before the cluster-wide secrets existed, create
-them once in the dev shell (needs your admin key if `secrets/common.yaml`
-exists), then commit and deploy:
+If the hosts were installed before a cluster-wide secret existed (e.g.
+OpenBao's, added after the k3s token), create the missing ones once in the
+dev shell (needs your admin key if `secrets/common.yaml` exists), then
+commit and deploy:
 
 ```sh
 backfabric keygen
+git add secrets/common.yaml && git commit -m "chore: add the missing cluster-wide secrets"
+backfabric deploy node1
 ```
+
+## OpenBao
+
+Every host runs OpenBao next to k3s, for the secrets of the workloads. It
+unseals and initialises itself; the root token is in
+`/var/lib/openbao-init/root-token` on the host (root only). Use it there:
+
+```sh
+ssh node1
+export BAO_TOKEN=$(cat /var/lib/openbao-init/root-token)
+bao status
+```
+
+Pods reach it as `https://openbao.openbao.svc:8200`, trusting the CA
+`openbao-ca-cert` of `secrets/common.yaml`. What it holds is configured in
+the host's configuration; policies and roles not declared there are
+deleted. Permanent secrets come from the host's sops file
+(`sops.defaultSopsFile`):
+
+```nix
+backfabric.openbao = {
+  policies.my-app = ''
+    path "secret/data/my-app/*" {
+      capabilities = ["read"]
+    }
+  '';
+  # Each service account also needs the ClusterRole system:auth-delegator.
+  kubernetesRoles.my-app = {
+    serviceAccounts = [ "my-app" ];
+    namespaces = [ "my-app" ];
+    policies = [ "my-app" ];
+  };
+  # secret/my-app/db, field password = the sops secret my-app-db-password.
+  kv.secrets."my-app/db".password = "my-app-db-password";
+};
+```
+
+Snapshots, restore, the audit log, and renewing the TLS certificate:
+[OpenBao](https://github.com/backfabric/infra/blob/main/docs/openbao.md).
 
 ## Unlock after a reboot
 

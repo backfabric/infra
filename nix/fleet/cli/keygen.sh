@@ -20,25 +20,43 @@ Refuses if the host already has keys in its state directory or .pub files.
 With or without <host> (then before the host's keys), it also makes sure
 that secrets/common.yaml, the sops file every host can read, has the
 cluster-wide secrets:
-  - k3s-token: the k3s cluster token (32 random bytes, hex).
-Generates only the missing ones and never changes an existing value. Creates
-the file if it does not exist, encrypted as .sops.yaml says; adding to an
-existing file needs an admin key. Skipped without .sops.yaml.
+  - k3s-token: the k3s cluster token (32 random bytes, hex);
+  - openbao-seal-key: OpenBao's static seal key (32 random bytes, hex);
+  - openbao-ca-key, openbao-ca-cert: the CA of OpenBao's TLS certificate
+    (ECDSA P-256, 10 years);
+  - openbao-tls-key, openbao-tls-cert: OpenBao's TLS key and certificate
+    (ECDSA P-256, 3 years) for openbao.openbao.svc,
+    openbao.openbao.svc.cluster.local and 127.0.0.1, signed by that CA.
+Generates only the missing ones and never changes an existing value; with
+the CA present and both openbao-tls-* missing, it issues a new server
+certificate (rotation, docs/openbao.md). Creates the file if it does not
+exist, encrypted as .sops.yaml says; adding to an existing file needs an
+admin key. Skipped without .sops.yaml.
 
 Without <host>, only the cluster-wide secrets: for hosts that are already
 installed.
 EOF
 }
 
-# The cluster-wide secrets in secrets/common.yaml. Each is random, generated
+# The random cluster-wide secrets in secrets/common.yaml. Each is generated
 # by keygen if missing, and must never change afterwards (the k3s token is
-# needed to restore an etcd snapshot).
-clusterSecrets=(k3s-token)
+# needed to restore an etcd snapshot, the seal key to unseal OpenBao).
+clusterSecrets=(k3s-token openbao-seal-key)
+
+# OpenBao's TLS material, also in secrets/common.yaml.
+tlsCaSecrets=(openbao-ca-key openbao-ca-cert)
+tlsServerSecrets=(openbao-tls-key openbao-tls-cert)
+# The name pods use (nix/modules/openbao.nix), and the loopback address for
+# clients on the host.
+tlsNames=DNS:openbao.openbao.svc,DNS:openbao.openbao.svc.cluster.local,IP:127.0.0.1
+tlsCaDays=3650
+tlsServerDays=1095
 
 # ensure_cluster_secrets: adds the missing cluster-wide secrets to
 # secrets/common.yaml, creating the file if needed.
 ensure_cluster_secrets() {
-  local file=secrets/common.yaml name missing=() value
+  local file=secrets/common.yaml name missing=() present=() caKey caCert
+  local -A values=()
   if [[ ! -f .sops.yaml ]]; then
     echo "No .sops.yaml; once it exists (backfabric sops init), run backfabric keygen to create $file with the cluster-wide secrets."
     return
@@ -46,23 +64,59 @@ ensure_cluster_secrets() {
 
   # Only the values of a sops file are encrypted, so the names can be read
   # without a key.
-  for name in "${clusterSecrets[@]}"; do
+  for name in "${clusterSecrets[@]}" "${tlsCaSecrets[@]}" "${tlsServerSecrets[@]}"; do
     if [[ ! -f $file ]] || [[ $(name=$name yq 'has(strenv(name))' "$file") != true ]]; then
       missing+=("$name")
+    else
+      present+=("$name")
     fi
   done
   if [[ ${#missing[@]} -eq 0 ]]; then
-    echo "$file has every cluster-wide secret (${clusterSecrets[*]}); left unchanged."
+    echo "$file has every cluster-wide secret; left unchanged."
     return
   fi
 
-  # Values go to sops on stdin (printf is a builtin), never as arguments or
-  # into an unencrypted file.
+  # The values stay in this process's memory: they go to openssl and sops
+  # through pipes (printf is a builtin), never as arguments or into an
+  # unencrypted file.
+  for name in "${clusterSecrets[@]}"; do
+    if ! in_list "$name" "${present[@]}"; then
+      values[$name]=$(random_hex 32)
+    fi
+  done
+
+  case "$(tls_state "${present[@]}")" in
+  complete) ;;
+  none)
+    caKey=$(openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256)
+    caCert=$(openssl req -new -x509 -key <(printf '%s\n' "$caKey") \
+      -subj "/CN=OpenBao CA" -days "$tlsCaDays" \
+      -addext basicConstraints=critical,CA:TRUE,pathlen:0 \
+      -addext keyUsage=critical,keyCertSign,cRLSign)
+    values["openbao-ca-key"]=$caKey$'\n'
+    values["openbao-ca-cert"]=$caCert$'\n'
+    issue_tls_cert "$caKey" "$caCert"
+    ;;
+  ca)
+    # Rotation: a new server certificate from the existing CA.
+    caKey=$(sops decrypt --extract '["openbao-ca-key"]' "$file") ||
+      die "cannot read openbao-ca-key from $file; sops needs an admin key (docs/secrets.md)"
+    caCert=$(sops decrypt --extract '["openbao-ca-cert"]' "$file") ||
+      die "cannot read openbao-ca-cert from $file; sops needs an admin key (docs/secrets.md)"
+    issue_tls_cert "$caKey" "$caCert"
+    ;;
+  *)
+    die "$file has only some of OpenBao's TLS secrets (${tlsCaSecrets[*]} ${tlsServerSecrets[*]}). To issue a new server certificate, remove both ${tlsServerSecrets[*]} (sops unset $file '[\"<name>\"]'); see docs/openbao.md"
+    ;;
+  esac
+  unset caKey
+
   if [[ ! -f $file ]]; then
     mkdir -p "$(dirname "$file")"
-    # Encrypting needs only the public keys in .sops.yaml.
+    # Encrypting needs only the public keys in .sops.yaml. Each value as a
+    # JSON string, which YAML reads as well (the PEM values span lines).
     for name in "${missing[@]}"; do
-      printf '%s: %s\n' "$name" "$(random_hex 32)"
+      printf '%s: %s\n' "$name" "$(printf '%s' "${values[$name]}" | jq -Rs .)"
     done | sops encrypt --filename-override "$file" >"$file.new" || {
       rm -f "$file.new"
       die "cannot create $file with sops (see above); check the rule for $file in .sops.yaml"
@@ -73,14 +127,57 @@ ensure_cluster_secrets() {
     echo "Created $file with ${missing[*]}, encrypted for the keys of its rule in .sops.yaml."
   else
     for name in "${missing[@]}"; do
-      value=$(random_hex 32)
-      printf '"%s"' "$value" | sops set --value-stdin "$file" "[\"$name\"]" ||
+      printf '%s' "${values[$name]}" | jq -Rs . | sops set --value-stdin "$file" "[\"$name\"]" ||
         die "cannot add $name to $file; sops needs an admin key to edit it (docs/secrets.md)"
       echo "Added $name to $file."
     done
-    unset value
   fi
   echo "Commit $file; hosts read it at their next deployment."
+}
+
+# in_list <word> <list>...: whether <word> is one of <list>.
+in_list() {
+  local word=$1 item
+  shift
+  for item in "$@"; do
+    [[ $item != "$word" ]] || return 0
+  done
+  return 1
+}
+
+# tls_state <present names>...: which of OpenBao's TLS secrets exist:
+# complete, none, ca (the CA without the server certificate), or partial.
+tls_state() {
+  local name ca=0 server=0
+  for name in "${tlsCaSecrets[@]}"; do
+    ! in_list "$name" "$@" || ca=$((ca + 1))
+  done
+  for name in "${tlsServerSecrets[@]}"; do
+    ! in_list "$name" "$@" || server=$((server + 1))
+  done
+  case "$ca$server" in
+  22) echo complete ;;
+  00) echo none ;;
+  20) echo ca ;;
+  *) echo partial ;;
+  esac
+}
+
+# issue_tls_cert <CA key> <CA cert>: generates OpenBao's server key and a
+# certificate signed by the CA, into values[openbao-tls-key] and
+# values[openbao-tls-cert] of ensure_cluster_secrets.
+issue_tls_cert() {
+  local key cert
+  key=$(openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256)
+  cert=$(openssl req -new -key <(printf '%s\n' "$key") -subj /CN=openbao.openbao.svc \
+    -addext basicConstraints=critical,CA:FALSE \
+    -addext keyUsage=critical,digitalSignature \
+    -addext extendedKeyUsage=serverAuth \
+    -addext "subjectAltName=$tlsNames" |
+    openssl x509 -req -CA <(printf '%s\n' "$2") -CAkey <(printf '%s\n' "$1") \
+      -days "$tlsServerDays" -copy_extensions copyall)
+  values["openbao-tls-key"]=$key$'\n'
+  values["openbao-tls-cert"]=$cert$'\n'
 }
 
 # random_hex <bytes>: prints <bytes> random bytes from /dev/urandom in hex.

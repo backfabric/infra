@@ -12,6 +12,7 @@
   jq,
   nixos-anywhere,
   nixos-rebuild,
+  openssl,
   sops,
   ssh-to-age,
   yq-go,
@@ -27,6 +28,7 @@ writeShellApplication {
     jq
     nixos-anywhere
     nixos-rebuild
+    openssl
     sops
     ssh-to-age
     yq-go

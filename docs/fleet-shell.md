@@ -196,7 +196,7 @@ can be run again after a failure; none waits for a reboot.
 
 | Step | Command | Where | Does |
 | ---- | ------- | ----- | ---- |
-| 1 | `backfabric keygen node1` | locally (`nix run`, see above) | host key, initrd host key and LUKS passphrase into the state directory; `.pub` files into the repository; `secrets/common.yaml` with the k3s token if missing |
+| 1 | `backfabric keygen node1` | locally (`nix run`, see above) | host key, initrd host key and LUKS passphrase into the state directory; `.pub` files into the repository; `secrets/common.yaml` with the cluster-wide secrets (k3s token, OpenBao seal key and TLS material) that are missing |
 | 2 | `backfabric sops add-host node1` | dev shell | the host's age recipient into `.sops.yaml`, `secrets/common.yaml` re-encrypted for it |
 | 3 | `backfabric probe node1` | server in the Hetzner Rescue system | pins the host key, kexec into the NixOS installer, facter report, hardware summary, evaluation, uplink check |
 | 4 | commit | | the report, after reviewing it, and the host's other new files |
@@ -238,7 +238,7 @@ repository only sees files in the index, and this makes them visible without
 staging their content.
 
 Cluster-wide secrets: if `.sops.yaml` exists, every secret of
-`secrets/common.yaml` (today the k3s token, `k3s-token`) that is missing is
+`secrets/common.yaml` (the k3s token, OpenBao's seal key, CA and server certificate) that is missing is
 generated; existing values are never changed. A missing file is created,
 encrypted for the keys of its rule in `.sops.yaml`, which needs no admin
 key; adding to an existing file needs one (sops finds it as usual, e.g.
