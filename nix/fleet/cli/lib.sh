@@ -19,6 +19,41 @@ check_host_name() {
   [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] ||
     die "host name $1: only letters, digits, - and _ are supported"
   [[ $1 != common ]] || die "host name common: secrets/common.yaml is the file of all hosts"
+  [[ $1 != admin ]] || die "host name admin: secrets/admin.yaml is the file of the admins only"
+}
+
+# Fails if .sops.yaml has admin keys (admin_*) whose type cannot be told from
+# the value: the generated rules list them under age or pgp by their value.
+check_admin_key_types() {
+  local unknown
+  unknown=$(yq '.keys[] | select(anchor | test("^admin_")) |
+    select(test("^(age1|ssh-)|^[0-9A-Fa-f]{40}$") | not) | anchor' .sops.yaml)
+  [[ -z $unknown ]] ||
+    die "admin keys of unknown type in .sops.yaml: ${unknown//$'\n'/, }; $1 by hand"
+}
+
+# ensure_admin_rule: adds the rule for secrets/admin.yaml to .sops.yaml if it
+# is missing: every admin key (admin_*), no host. The file holds what only
+# the admins need, e.g. the key of OpenBao's CA; backfabric sops add-host
+# never adds a host to it.
+ensure_admin_rule() {
+  export adminRegex='^secrets/admin\.yaml$'
+  [[ $(yq '[.creation_rules[] | select(.path_regex == strenv(adminRegex))] | length' .sops.yaml) == 0 ]] ||
+    return 0
+  check_admin_key_types "add the rule for secrets/admin.yaml"
+  # The new lists first hold the anchor names, which then become aliases.
+  yq -i '
+    .creation_rules += [{
+      "path_regex": strenv(adminRegex),
+      "key_groups": [{
+        "age": [.keys[] | select(anchor | test("^admin_")) | select(test("^(age1|ssh-)")) | anchor],
+        "pgp": [.keys[] | select(anchor | test("^admin_")) | select(test("^[0-9A-Fa-f]{40}$")) | anchor]
+      }]
+    }] |
+    (.creation_rules[-1].key_groups[0][][]) alias |= . |
+    del(.creation_rules[-1].key_groups[0][] | select(length == 0))
+  ' .sops.yaml
+  echo "Added the rule for secrets/admin.yaml (admin keys only) to .sops.yaml."
 }
 
 # Fails unless the flake in the current directory has nixosConfigurations.<host>.

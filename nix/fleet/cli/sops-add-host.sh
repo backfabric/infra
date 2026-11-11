@@ -86,10 +86,7 @@ cmd_sops_add_host() {
     [[ $(yq '[.creation_rules[] | select(.path_regex == strenv(hostRegex))] | length' .sops.yaml) == 0 ]] ||
       die ".sops.yaml has a rule with path_regex $hostRegex but no key $anchor; fix it by hand"
     # The host rule lists the admin keys by type, which is told by the value.
-    unknown=$(yq '.keys[] | select(anchor | test("^admin_")) |
-      select(test("^(age1|ssh-)|^[0-9A-Fa-f]{40}$") | not) | anchor' .sops.yaml)
-    [[ -z $unknown ]] ||
-      die "admin keys of unknown type in .sops.yaml: ${unknown//$'\n'/, }; add $host by hand"
+    check_admin_key_types "add $host"
 
     # The new lists first hold the anchor names, which then become aliases.
     yq -i '

@@ -154,10 +154,12 @@ host's facter report exists.
 host need them (`backfabric help`):
 
 - `backfabric sops init (--age <recipient> | --pgp <fingerprint>)...`: creates
-  `.sops.yaml` with the admin keys, once; see [secrets.md](secrets.md).
+  `.sops.yaml` with the admin keys and the rules for `secrets/common.yaml`
+  and `secrets/admin.yaml`, once; see [secrets.md](secrets.md).
 - `backfabric keygen [<host>]`: generates the host's keys and LUKS
   passphrase, and the cluster-wide secrets missing from
-  `secrets/common.yaml` (without `<host>`, only those).
+  `secrets/common.yaml` and `secrets/admin.yaml` (without `<host>`, only
+  those).
 - `backfabric sops add-host [--replace] <host>`: adds a host to `.sops.yaml`
   and re-encrypts its files; see [secrets.md](secrets.md).
 - `backfabric probe <host>`: boots the server into the NixOS installer and
@@ -196,7 +198,7 @@ can be run again after a failure; none waits for a reboot.
 
 | Step | Command | Where | Does |
 | ---- | ------- | ----- | ---- |
-| 1 | `backfabric keygen node1` | locally (`nix run`, see above) | host key, initrd host key and LUKS passphrase into the state directory; `.pub` files into the repository; `secrets/common.yaml` with the k3s token if missing |
+| 1 | `backfabric keygen node1` | locally (`nix run`, see above) | host key, initrd host key and LUKS passphrase into the state directory; `.pub` files into the repository; `secrets/common.yaml` and `secrets/admin.yaml` with the cluster-wide secrets (k3s token, OpenBao seal key and TLS material; the CA key in `admin.yaml`) that are missing |
 | 2 | `backfabric sops add-host node1` | dev shell | the host's age recipient into `.sops.yaml`, `secrets/common.yaml` re-encrypted for it |
 | 3 | `backfabric probe node1` | server in the Hetzner Rescue system | pins the host key, kexec into the NixOS installer, facter report, hardware summary, evaluation, uplink check |
 | 4 | commit | | the report, after reviewing it, and the host's other new files |
@@ -238,7 +240,7 @@ repository only sees files in the index, and this makes them visible without
 staging their content.
 
 Cluster-wide secrets: if `.sops.yaml` exists, every secret of
-`secrets/common.yaml` (today the k3s token, `k3s-token`) that is missing is
+`secrets/common.yaml` (the k3s token, OpenBao's seal key, CA certificate and server certificate) and of `secrets/admin.yaml` (OpenBao's CA key; its rule in `.sops.yaml` is added if missing) that is missing is
 generated; existing values are never changed. A missing file is created,
 encrypted for the keys of its rule in `.sops.yaml`, which needs no admin
 key; adding to an existing file needs one (sops finds it as usual, e.g.

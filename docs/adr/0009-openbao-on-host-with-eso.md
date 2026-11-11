@@ -1,6 +1,6 @@
 # Workload secrets in OpenBao on the host, synced by External Secrets Operator
 
-Secrets for workloads (agents) live in OpenBao, written at runtime rather than committed, while sops keeps only host bootstrap and long-lived secrets (loaded into OpenBao at deployment). OpenBao runs as a NixOS service on the host, not in the cluster, so it does not depend on cluster health and is configured as code (mounts, policies, Kubernetes auth by an idempotent oneshot, initialised automatically, static seal). External Secrets Operator syncs values into ordinary Kubernetes Secrets, so pods consume them unchanged; the copies in etcd are encrypted by k3s secrets encryption (`secretbox`). Not implemented yet.
+Secrets for workloads (agents) live in OpenBao, written at runtime rather than committed, while sops keeps only host bootstrap and long-lived secrets (loaded into OpenBao at deployment). OpenBao runs as a NixOS service on the host, not in the cluster, so it does not depend on cluster health and is configured as code (mounts, policies, Kubernetes auth by an idempotent oneshot, initialised automatically, static seal). External Secrets Operator syncs values into ordinary Kubernetes Secrets, so pods consume them unchanged; the copies in etcd are encrypted by k3s secrets encryption (`secretbox`). OpenBao is implemented by the `openbao` subsystem (TLS and token review: ADR 0019); External Secrets Operator is not implemented yet.
 
 ## Considered Options
 
