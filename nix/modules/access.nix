@@ -81,8 +81,7 @@ in
     services.openssh = {
       enable = true;
       ports = [ cfg.ssh.port ];
-      # Opens `ssh.port` in the firewall; port knocking (Stage 4) replaces this
-      # with a rule that opens it only for the knocking source address.
+      # Opens `ssh.port` in the firewall (ADR 0018).
       openFirewall = true;
       settings = {
         PasswordAuthentication = false;
