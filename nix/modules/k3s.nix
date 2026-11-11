@@ -25,7 +25,8 @@
 #     outside;
 #   - the Kubernetes API is not reachable from outside: no port is opened on
 #     the uplink. `kubectl` runs on the host as root, with the kubeconfig k3s
-#     writes to /etc/rancher/k3s/k3s.yaml.
+#     writes to /etc/rancher/k3s/k3s.yaml (KUBECONFIG, for other clients
+#     such as `flux`).
 #
 # Joining further servers or agents is not implemented yet.
 #
@@ -259,5 +260,9 @@ in
     # Only this port, and only from cni0 (k3s's docs trust the whole pod and
     # service CIDRs instead, ADR 0017): the uplink stays closed.
     networking.firewall.interfaces.cni0.allowedTCPPorts = [ 6443 ];
+
+    # k3s's kubectl finds this file by itself; other clients (flux, helm)
+    # read KUBECONFIG. Only root can read it.
+    environment.variables.KUBECONFIG = "/etc/rancher/k3s/k3s.yaml";
   };
 }

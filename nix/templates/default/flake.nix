@@ -18,14 +18,23 @@
     let
       inherit (nixpkgs) lib;
 
-      # A host: the backfabric modules, the cluster-wide secrets (the k3s
-      # token; created by `backfabric keygen`), and the host's directory.
+      # A host: the backfabric modules, the cluster-wide settings (the
+      # secrets created by `backfabric keygen`, the repository Flux syncs),
+      # and the host's directory.
       mkHost =
         path:
         lib.nixosSystem {
           modules = [
             backfabric.nixosModules.default
-            { backfabric.secrets.commonFile = ./secrets/common.yaml; }
+            {
+              backfabric.secrets.commonFile = ./secrets/common.yaml;
+              # Flux applies agents/ of this repository (README, "Agents").
+              backfabric.flux.repository = {
+                # This repository's HTTPS URL; required.
+                # url = "https://github.com/<owner>/<repository>";
+                path = "./agents";
+              };
+            }
             path
           ];
         };

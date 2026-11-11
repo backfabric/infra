@@ -44,7 +44,8 @@ requires them there for the flake to be `github:backfabric/infra`.
   [replacing a failed disk](docs/disk-replacement.md),
   [unlocking the disks over SSH](docs/initrd-unlock.md),
   [managing secrets](docs/secrets.md),
-  [OpenBao](docs/openbao.md);
+  [OpenBao](docs/openbao.md),
+  [Flux](docs/flux.md);
   architectural decisions in [docs/adr/](docs/adr/).
 
 ## Private repository
@@ -138,6 +139,20 @@ nix flake init -t github:backfabric/infra
   `/var/log/openbao/audit.log` (values HMACed, rotated daily, 30 kept); a
   raft snapshot daily in `/var/lib/openbao-snapshots` (14 kept). See
   [docs/openbao.md](docs/openbao.md).
+- `flux`: [Flux](https://fluxcd.io) in the cluster, applying one directory
+  of the private repository: the agents' workloads, which Nix does not
+  manage ([ADR 0020](docs/adr/0020-gitops-with-flux-for-agent-workloads.md)).
+  The manifests of the nixpkgs `fluxcd` package (`flux install --export` at
+  build time): source-, kustomize-, and helm-controller, Pod Security
+  `restricted`, Flux's network policies. A GitRepository and a
+  Kustomization `flux-system/fleet` sync `backfabric.flux.repository.path`
+  of `repository.url` (HTTPS) on `repository.branch` (default `main`),
+  fetched every `interval` (default `1m`), pruning what is removed. Flux
+  authenticates with `flux-git-token` from `backfabric.secrets.commonFile`,
+  a read-only fine-grained GitHub token the operator creates, rendered into
+  a root-only file outside the Nix store. The `flux` CLI is on the host
+  (`KUBECONFIG` points at k3s's kubeconfig, readable by root only). See
+  [docs/flux.md](docs/flux.md).
 
 ## Checks
 

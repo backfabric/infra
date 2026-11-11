@@ -65,6 +65,18 @@ git add .sops.yaml && git commit -m "chore: add sops configuration"
 See [secrets](https://github.com/backfabric/infra/blob/main/docs/secrets.md)
 for the layout of `.sops.yaml` and the secret files.
 
+Flux in the cluster applies `agents/` of this repository, fetched from
+GitHub (see [Agents](#agents)). Push the repository to a private GitHub
+repository and set its HTTPS URL in `mkHost` in `flake.nix`; until then no
+host evaluates:
+
+```nix
+backfabric.flux.repository = {
+  url = "https://github.com/<owner>/<repository>";
+  path = "./agents";
+};
+```
+
 ## Add a host
 
 Order the server and note its data from the Hetzner Robot. Create
@@ -148,10 +160,13 @@ for details and what to re-run after which failure.
    changes an existing value). From here on, work in the dev shell.
 
 2. Add the host to `.sops.yaml` (this re-encrypts `secrets/common.yaml` for
-   it):
+   it), and, the first time, add the token Flux reads this repository with,
+   `flux-git-token` (create it as [Agents](#agents) says; `sops` opens the
+   file in your editor, add the line `flux-git-token: github_pat_...`):
 
    ```sh
    backfabric sops add-host node1
+   sops secrets/common.yaml
    ```
 
 3. Activate the Rescue system for the server in the Robot (with your SSH
@@ -288,6 +303,45 @@ backfabric.openbao = {
 
 Snapshots, restore, the audit log, and renewing the TLS certificate:
 [OpenBao](https://github.com/backfabric/infra/blob/main/docs/openbao.md).
+
+## Agents
+
+The agents' workloads are not part of the hosts' configuration: Flux in
+the cluster applies `agents/` of this repository (branch `main`), checking
+for new commits every minute (`backfabric.flux.interval`). List manifests
+or directories in `agents/kustomization.yaml`; what is removed from there
+is deleted from the cluster. Pods must meet Pod Security `restricted`
+(see [The cluster](#the-cluster)). Whoever can push to `main` controls the
+cluster.
+
+Flux reads this repository with a fine-grained GitHub token that can only
+read it. Create it in GitHub, Settings, Developer settings, Personal access
+tokens, Fine-grained tokens, Generate new token:
+
+- Resource owner: the owner of this repository;
+- Expiration: your choice (up to 366 days, or no expiration); note the
+  date: Flux stops syncing when the token expires;
+- Repository access: Only select repositories, this repository;
+- Permissions, Repository permissions: Contents, Read-only (Metadata,
+  Read-only is mandatory and added by GitHub); nothing else.
+
+Store it as `flux-git-token` in `secrets/common.yaml` (`sops
+secrets/common.yaml`), commit, and deploy. To replace it, change the value
+the same way; the deployment restarts k3s, which applies the new Secret
+(the pods keep running).
+
+Check on the host:
+
+```sh
+ssh node1
+flux get all                          # Ready, with the fetched commit
+kubectl -n flux-system get gitrepositories,kustomizations
+flux reconcile source git fleet       # fetch now instead of waiting
+```
+
+A wrong or expired token shows as the GitRepository `fleet` not Ready, with
+the authentication error in its message. See
+[Flux](https://github.com/backfabric/infra/blob/main/docs/flux.md).
 
 ## Unlock after a reboot
 

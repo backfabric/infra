@@ -58,6 +58,14 @@
     kv.secrets."example/app".password = "example-app-password";
   };
 
+  # The private repository itself, which a real host sets once for every
+  # host in the template's `mkHost`; Flux syncs its `agents/` directory with
+  # `flux-git-token` from the cluster-wide sops file.
+  backfabric.flux.repository = {
+    url = "https://github.com/example/fleet";
+    path = "./agents";
+  };
+
   # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,
   # with the report that `backfabric probe` generates with nixos-facter. This
   # excerpt has the shape of a real report of a Hetzner server (fields the
