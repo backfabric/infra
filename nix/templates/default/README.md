@@ -143,8 +143,9 @@ for details and what to re-run after which failure.
 
    The first time, it also creates `secrets/common.yaml` with the
    cluster-wide secrets: the k3s cluster token, and OpenBao's seal key, CA
-   and TLS certificate (encrypted as `.sops.yaml` says; it never changes an
-   existing value). From here on, work in the dev shell.
+   and TLS certificate; the CA's key goes into `secrets/admin.yaml`, which
+   only the admins can read (encrypted as `.sops.yaml` says; it never
+   changes an existing value). From here on, work in the dev shell.
 
 2. Add the host to `.sops.yaml` (this re-encrypts `secrets/common.yaml` for
    it):
@@ -236,12 +237,16 @@ arguments), and deploy.
 
 If the hosts were installed before a cluster-wide secret existed (e.g.
 OpenBao's, added after the k3s token), create the missing ones once in the
-dev shell (needs your admin key if `secrets/common.yaml` exists), then
-commit and deploy:
+dev shell (needs your admin key if `secrets/common.yaml` exists; it also
+adds the rule for `secrets/admin.yaml` to `.sops.yaml` and moves an
+`openbao-ca-key` found in `secrets/common.yaml` there, after which you
+replace the CA, see
+[OpenBao](https://github.com/backfabric/infra/blob/main/docs/openbao.md#tls)),
+then commit and deploy:
 
 ```sh
 backfabric keygen
-git add secrets/common.yaml && git commit -m "chore: add the missing cluster-wide secrets"
+git add .sops.yaml secrets/ && git commit -m "chore: add the missing cluster-wide secrets"
 backfabric deploy node1
 ```
 

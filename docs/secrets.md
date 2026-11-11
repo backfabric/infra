@@ -17,7 +17,9 @@ the private repository and decrypted on the host by
   (age, PGP, ...) and where it lives is the private repository's choice; the
   commands here never create or look for admin keys (sops finds them). They
   only add and replace host recipients and add missing cluster-wide secrets.
-- Two kinds of sops files: `secrets/common.yaml`, readable by every host, and
+- Three kinds of sops files: `secrets/common.yaml`, readable by every host,
+  `secrets/admin.yaml`, readable by the admins only (secrets no host needs,
+  e.g. the key of OpenBao's CA), and
   `secrets/<host>.yaml`, readable by that host only. The private repository
   sets `backfabric.secrets.commonFile` to `secrets/common.yaml` for every
   host (the template's `mkHost` does), and `sops.defaultSopsFile` to the
@@ -46,7 +48,8 @@ to overwrite an existing `.sops.yaml`. The result, after adding two hosts:
 ```yaml
 # sops configuration, created by backfabric sops init. backfabric sops add-host
 # maintains the hosts: the keys host_<host>, the rules for secrets/<host>.yaml,
-# and the hosts in the rule for secrets/common.yaml. The admin keys (admin_<n>)
+# and the hosts in the rule for secrets/common.yaml. secrets/admin.yaml is for
+# the admins only: no host belongs in its rule. The admin keys (admin_<n>)
 # may be edited by hand; a new admin key belongs in every rule.
 keys:
   - &admin_0 "age1..."
@@ -60,6 +63,12 @@ creation_rules:
           - *admin_0
           - *host_node1
           - *host_node2
+        pgp:
+          - *admin_1
+  - path_regex: ^secrets/admin\.yaml$
+    key_groups:
+      - age:
+          - *admin_0
         pgp:
           - *admin_1
   - path_regex: ^secrets/node1\.yaml$
@@ -147,7 +156,7 @@ and re-encrypts the files as above.
 `backfabric keygen` writes the host's `.pub` files; add the host to
 `.sops.yaml` right after it, before `backfabric install`, which refuses
 while the host is missing from `.sops.yaml` or is there with another key.
-Host names may contain letters, digits, `-` and `_`; `common` is reserved.
+Host names may contain letters, digits, `-` and `_`; `common` and `admin` are reserved.
 
 In a new private repository, without hosts, the dev shell evaluates and
 `sops init` runs in it. If the shell does not evaluate (a host without `.pub`
@@ -162,13 +171,14 @@ Commit `.sops.yaml` and the re-encrypted files before deploying the host.
 
 ## Cluster-wide secrets
 
-`secrets/common.yaml` holds the secrets every host shares:
+`secrets/common.yaml` holds the secrets every host shares, and
+`secrets/admin.yaml` the cluster-wide secrets only the admins need:
 
 | Key | Used by | Value |
 | --- | ------- | ----- |
 | `k3s-token` | `k3s` subsystem, `services.k3s.tokenFile` (`/run/secrets/k3s-token`, root, mode 0400) | 32 random bytes, hex |
 | `openbao-seal-key` | `openbao` subsystem, static seal (systemd credential of `openbao.service`) | 32 random bytes, hex |
-| `openbao-ca-key` | `backfabric keygen` only, to issue a new server certificate | ECDSA P-256 private key (PEM) |
+| `openbao-ca-key` (in `secrets/admin.yaml`) | `backfabric keygen` only, to issue a new server certificate | ECDSA P-256 private key (PEM) |
 | `openbao-ca-cert` | clients of OpenBao (`/run/secrets/openbao-ca-cert`, mode 0444, `BAO_CACERT` on the host) | self-signed CA certificate, 10 years |
 | `openbao-tls-key`, `openbao-tls-cert` | `openbao` subsystem, TLS listeners (systemd credentials) | ECDSA P-256 key and certificate, 3 years, for `openbao.openbao.svc`, `openbao.openbao.svc.cluster.local` and `127.0.0.1` |
 
@@ -188,9 +198,17 @@ missing and never changes an existing value:
 - The file exists: the key names of a sops file are not encrypted, so the
   command sees which secrets are missing without a key, and adds each with
   `sops set --value-stdin`, which needs an admin key.
+- The same for `secrets/admin.yaml`. If `.sops.yaml` has no rule for it
+  (a repository created before it existed), `keygen` adds one with every
+  admin key (`admin_*`) and no host; commit `.sops.yaml` with the secrets.
+- `openbao-ca-key` in `secrets/common.yaml`, where earlier versions put
+  it: moved to `secrets/admin.yaml` (needs an admin key). Every host could
+  decrypt it there, and the git history keeps it: replace the CA, see
+  [openbao.md](openbao.md#tls).
 
-Hosts added later get the file through `backfabric sops add-host`, which
-re-encrypts it for them.
+Hosts added later get `secrets/common.yaml` through `backfabric sops
+add-host`, which re-encrypts it for them; it never adds a host to the rule
+of `secrets/admin.yaml`.
 
 The k3s token must never change: k3s encrypts its bootstrap data in etcd
 with it, so a cluster, and an etcd snapshot restored on a new server, only

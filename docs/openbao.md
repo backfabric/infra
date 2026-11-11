@@ -23,19 +23,29 @@ configuration is applied from Nix on every deployment.
   changes its configuration does not restart it; run
   `systemctl restart openbao` (it unseals itself). A new TLS certificate
   from sops restarts it.
-- `openbao-init.service`: if OpenBao is not initialised, runs
-  `bao operator init` (with the static seal: one recovery key, no unseal
-  keys) and writes the output to `/var/lib/openbao-init/init.json` and the
-  root token to `root-token`. The root token is kept, not revoked.
+- `openbao-init.service`: reads `bao status`; if OpenBao is not
+  initialised, runs `bao operator init` (with the static seal: one recovery
+  key, no unseal keys) and writes the output to
+  `/var/lib/openbao-init/init.json` and the root token to `root-token`. The
+  root token is kept, not revoked. It never initialises twice: if OpenBao
+  is initialised but `init.json` is missing or incomplete, it fails and says
+  that the keys are lost; leftovers of a failed run (an empty
+  `init.json.new`) are removed while OpenBao reports that it is not
+  initialised.
 - `openbao-config.service`: after `openbao-init` and k3s, and on every
   deployment that changes it: the KV v2 mount `secret/`, the Kubernetes
   auth method `kubernetes/` (against `https://127.0.0.1:6443` with k3s's
   server CA), the policies `backfabric.openbao.policies`, the roles
   `backfabric.openbao.kubernetesRoles` (policies and roles not declared are
   deleted), and the permanent secrets `backfabric.openbao.kv.secrets` from
-  sops (written only when they differ). Both oneshots are restarted by
-  systemd until they succeed.
+  sops (written only when they differ).
 - `openbao-snapshot.timer`: daily `bao operator raft snapshot save`.
+
+The oneshots wait for what they need for a bounded time (OpenBao 60 s, the
+k3s API 120 s) and then fail; systemd does not restart them. A deployment
+then reports the failed unit (`switch`/`test` exit with status 4) instead of
+waiting. After fixing the cause, run `systemctl restart openbao-config` (or
+deploy again). `journalctl -u openbao-config` says what it waited for.
 
 ## Using `bao` on the host
 
@@ -60,11 +70,14 @@ service account that logs in therefore needs the ClusterRole
 `backfabric keygen` generates a CA (ECDSA P-256, 10 years) and a server
 certificate (ECDSA P-256, 3 years) for `openbao.openbao.svc`,
 `openbao.openbao.svc.cluster.local` and `127.0.0.1`. Clients trust the CA,
-`openbao-ca-cert`. Check the certificate on the host:
+`openbao-ca-cert`. The CA's key, `openbao-ca-key`, is in
+`secrets/admin.yaml`, which only the admins can decrypt; hosts never need
+it. Check the certificate on the host (or anywhere with OpenSSL or
+LibreSSL, against a copy of the CA certificate):
 
 ```sh
 openssl s_client -connect 127.0.0.1:8200 -CAfile /run/secrets/openbao-ca-cert </dev/null 2>/dev/null |
-  openssl x509 -noout -ext subjectAltName -enddate
+  openssl x509 -noout -text | grep -E -A1 'Not After|Subject Alternative Name'
 ```
 
 To issue a new server certificate (before it expires; clients keep
@@ -74,11 +87,26 @@ trusting the CA), in the dev shell:
 sops unset secrets/common.yaml '["openbao-tls-key"]'
 sops unset secrets/common.yaml '["openbao-tls-cert"]'
 backfabric keygen
-git commit secrets/common.yaml -m "chore: renew OpenBao's TLS certificate"
+git commit secrets/ -m "chore: renew OpenBao's TLS certificate"
 backfabric deploy node1
 ```
 
 The deployment restarts OpenBao with the new certificate.
+
+To replace the CA as well (e.g. after its key was readable by hosts:
+earlier versions kept `openbao-ca-key` in `secrets/common.yaml`, and the git
+history still has it there), remove all four and run `keygen`; clients that
+trust the old CA need the new `openbao-ca-cert`:
+
+```sh
+sops unset secrets/admin.yaml '["openbao-ca-key"]'
+for name in openbao-ca-cert openbao-tls-key openbao-tls-cert; do
+  sops unset secrets/common.yaml "[\"$name\"]"
+done
+backfabric keygen
+git commit .sops.yaml secrets/ -m "chore: replace OpenBao's CA"
+backfabric deploy node1
+```
 
 ## Audit log
 

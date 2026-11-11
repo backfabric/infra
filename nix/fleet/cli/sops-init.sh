@@ -6,8 +6,9 @@ usage_sops_init() {
 Usage: backfabric sops init (--age <recipient> | --pgp <fingerprint>)...
 
 Creates .sops.yaml in the current directory, the root of the private
-repository, with the given admin keys (in order: admin_0, admin_1, ...) and a
-rule for secrets/common.yaml. Both options may be repeated and mixed; at least
+repository, with the given admin keys (in order: admin_0, admin_1, ...), a
+rule for secrets/common.yaml, and a rule for secrets/admin.yaml (admin keys
+only, never hosts). Both options may be repeated and mixed; at least
 one key is required. Refuses if .sops.yaml exists. Hosts are added with
 backfabric sops add-host.
 
@@ -61,7 +62,8 @@ cmd_sops_init() {
     cat <<'EOF'
 # sops configuration, created by backfabric sops init. backfabric sops add-host
 # maintains the hosts: the keys host_<host>, the rules for secrets/<host>.yaml,
-# and the hosts in the rule for secrets/common.yaml. The admin keys (admin_<n>)
+# and the hosts in the rule for secrets/common.yaml. secrets/admin.yaml is for
+# the admins only: no host belongs in its rule. The admin keys (admin_<n>)
 # may be edited by hand; a new admin key belongs in every rule.
 keys:
 EOF
@@ -85,6 +87,7 @@ EOF
       done
     done
   } >.sops.yaml
+  ensure_admin_rule >/dev/null
 
   echo "Created .sops.yaml with ${#keys[@]} admin key(s). Add hosts with backfabric sops add-host <host>."
 }
