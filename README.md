@@ -124,7 +124,13 @@ nix flake init -t github:backfabric/infra
   `backfabric.k3s.package` (default `pkgs.k3s_1_36`, the newest minor
   version of the NixOS stable release) pins the k3s minor version: upgrade
   one minor version at a time, with `switch`, never `test` (see the
-  template's README). Joining more nodes is not implemented yet.
+  template's README).
+  `backfabric.k3s.removedManifests` names k3s manifests that are no longer
+  deployed (set by modules while they are turned off): each becomes a k3s
+  `--disable` entry and its symlink an empty manifest, so k3s deletes the
+  objects it applied from it, the file, and its Addon; see the comment in
+  [nix/modules/k3s.nix](nix/modules/k3s.nix). Joining more nodes is not
+  implemented yet.
 - `openbao`: [OpenBao](https://openbao.org/) on the host
   ([ADR 0009](docs/adr/0009-openbao-on-host-with-eso.md)), the upstream
   `services.openbao` with raft storage, no UI. Static seal with

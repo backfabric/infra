@@ -25,7 +25,42 @@
 #     outside;
 #   - the Kubernetes API is not reachable from outside: no port is opened on
 #     the uplink. `kubectl` runs on the host as root, with the kubeconfig k3s
-#     writes to /etc/rancher/k3s/k3s.yaml.
+#     writes to /etc/rancher/k3s/k3s.yaml;
+#   - manifests that modules no longer deploy are removed from the cluster
+#     (`backfabric.k3s.removedManifests`, below).
+#
+# Removing manifests. k3s applies every file in
+# /var/lib/rancher/k3s/server/manifests and ignores files that disappear:
+# their objects and their Addon (kube-system) stay. nixpkgs'
+# `services.k3s.manifests` never removes a symlink it created, and a
+# symlink that dangles (e.g. into /run/secrets once its sops secret is gone)
+# stops k3s from processing the whole directory. So a module whose
+# manifests can be turned off lists their names in `removedManifests` while
+# it is off, from one let-binding used for both, so the lists cannot drift:
+#
+#     names = [ "foo" "foo-credentials" ];
+#     services.k3s.manifests = lib.mkIf cfg.enable (lib.genAttrs names ...);
+#     backfabric.k3s.removedManifests = lib.mkIf (!cfg.enable) names;
+#
+# A host configuration sets it directly for a module it stopped importing.
+# Each name becomes a k3s `--disable` entry, k3s's mechanism for removing
+# manifests, and its symlink is replaced by an empty manifest, so that the
+# file exists (k3s only visits existing files) and k3s can read it. k3s
+# then deletes every object it applied from that file (of the kinds the
+# Addon's `addon.k3s.cattle.io/gvks` annotation records, which k3s updates
+# after every successful apply), the file, and the Addon. Consequences:
+#   - changing the list changes k3s's flags: the deployment restarts k3s
+#     (pods keep running);
+#   - removing a manifest that contains a Namespace deletes everything in
+#     that namespace, also objects that did not come from the manifest;
+#   - a removed PersistentVolume with reclaim policy Retain leaves its data
+#     on the host;
+#   - names of k3s's packaged components (coredns, local-storage, ...) must
+#     not be listed: k3s would uninstall them;
+#   - systemd-tmpfiles links the empty manifest again (at boot); k3s deletes
+#     it again, which removes nothing more.
+# Objects removed from a manifest that is still deployed need none of this:
+# k3s prunes them when it applies the changed file.
 #
 # Joining further servers or agents is not implemented yet.
 #
@@ -109,6 +144,21 @@ let
   # host's input firewall. k3s's own Services (the API server's
   # `kubernetes`, CoreDNS's `kube-dns`) are ClusterIP.
   externalServicesPolicy = "backfabric-deny-external-services";
+
+  manifestDir = "/var/lib/rancher/k3s/server/manifests";
+
+  # Linked in place of every removed manifest: k3s only visits files that
+  # exist and can be read.
+  removedManifest = builtins.toFile "k3s-removed-manifest.yaml" ''
+    # Listed in backfabric.k3s.removedManifests: k3s deletes this file, the
+    # objects it applied from the manifest of this name, and its Addon.
+  '';
+
+  # The names k3s matches `--disable` entries against: the file names
+  # without their extension.
+  deployedManifests = lib.mapAttrsToList (
+    _: m: lib.removeSuffix ".${lib.last (lib.splitString "." m.target)}" m.target
+  ) (lib.filterAttrs (_: m: m.enable) config.services.k3s.manifests);
 in
 {
   options.backfabric.k3s = {
@@ -124,9 +174,37 @@ in
         release (ADR 0002).
       '';
     };
+
+    removedManifests = lib.mkOption {
+      # An Addon name: k3s names the Addon of a manifest after its file name.
+      type = lib.types.listOf (lib.types.strMatching "[a-z0-9]([-a-z0-9]*[a-z0-9])?");
+      default = [ ];
+      example = [
+        "foo"
+        "foo-credentials"
+      ];
+      description = ''
+        Names of k3s manifests (`services.k3s.manifests`) that are no longer
+        deployed. Each becomes a k3s `--disable` entry, and its file in
+        ${manifestDir} is replaced by an empty manifest: k3s deletes every
+        object it applied from that manifest, the file, and its Addon.
+        Set by modules for their manifests while they are turned off; a
+        host configuration sets it for a module it no longer imports.
+        Changing the list restarts k3s; removing a manifest with a
+        Namespace deletes everything in that namespace. Must not contain
+        deployed manifests or k3s's packaged components (coredns, ...).
+      '';
+    };
   };
 
   config = {
+    assertions = [
+      {
+        assertion = lib.intersectLists deployedManifests cfg.removedManifests == [ ];
+        message = "backfabric.k3s.removedManifests contains deployed k3s manifests: ${lib.concatStringsSep ", " (lib.intersectLists deployedManifests cfg.removedManifests)}";
+      }
+    ];
+
     sops.secrets.k3s-token = {
       sopsFile = config.backfabric.secrets.commonFile;
       # k3s runs as root and reads the file when it starts.
@@ -156,12 +234,15 @@ in
       # The address etcd and the API server advertise, instead of k3s's
       # guess from the default route.
       nodeIP = config.backfabric.network.ipv4.address;
+      # Packaged components the cluster does not use, and the manifests no
+      # longer deployed: k3s deletes what it applied from both.
       disable = [
         "traefik"
         "servicelb"
         "metrics-server"
         "local-storage"
-      ];
+      ]
+      ++ cfg.removedManifests;
       # The images of the k3s release for the host's platform (CoreDNS,
       # pause, the Helm controller's job, ...), linked into
       # /var/lib/rancher/k3s/agent/images; k3s imports them into containerd
@@ -247,12 +328,19 @@ in
     };
 
     # The guide: create the log directory with mode 0700 before k3s starts.
-    # The API server creates the log file with mode 0600.
-    systemd.tmpfiles.settings."10-backfabric-k3s".${auditLogDir}.d = {
-      mode = "0700";
-      user = "root";
-      group = "root";
-    };
+    # The API server creates the log file with mode 0600. And the empty
+    # manifest in place of every removed one (`L+` replaces the symlink
+    # nixpkgs left, even a dangling one).
+    systemd.tmpfiles.settings."10-backfabric-k3s" = {
+      ${auditLogDir}.d = {
+        mode = "0700";
+        user = "root";
+        group = "root";
+      };
+    }
+    // lib.genAttrs (map (name: "${manifestDir}/${name}.yaml") cfg.removedManifests) (_: {
+      "L+".argument = "${removedManifest}";
+    });
 
     # Pods reach the API server through the `kubernetes` service, which
     # kube-proxy translates to this node's address, port 6443; the packets

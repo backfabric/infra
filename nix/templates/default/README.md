@@ -245,6 +245,18 @@ backfabric deploy node1
 ssh node1 kubectl version
 ```
 
+k3s deploys every file in `/var/lib/rancher/k3s/server/manifests`, but
+keeps what it created from a file that disappears: when a subsystem is
+turned off, its module lists its manifests in
+`backfabric.k3s.removedManifests`, and the next deployment removes them,
+the objects k3s created from them (a removed Namespace takes everything in
+it), and their Addons
+(`kubectl get addon -n kube-system`). Data on the host stays, also that of
+PersistentVolumes with reclaim policy Retain. Changing the list restarts
+k3s; pods keep running. If you stop importing a module, set the names of
+its manifests in the host's configuration yourself, e.g.
+`backfabric.k3s.removedManifests = [ "otel" ];`.
+
 If the hosts were installed before a cluster-wide secret existed (e.g.
 OpenBao's, added after the k3s token), create the missing ones once in the
 dev shell (needs your admin key if `secrets/common.yaml` exists; it also
