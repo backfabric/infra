@@ -33,6 +33,19 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
       - name: Build image
         run: nix build .#packages.x86_64-linux.agent-image
+      # The supervisor starts as the agent user and answers; Codex runs.
+      # Nothing here talks to OpenAI.
+      - name: Run image
+        run: |
+          image=$(docker load <result | sed -n 's/^Loaded image: //p')
+          docker image inspect --format '{{json .Config}}' "$image"
+          docker run --detach --name agent --publish 8080:8080 "$image"
+          trap 'docker logs agent' EXIT
+          # Until the supervisor listens, docker's proxy resets connections.
+          curl --silent --show-error --fail --retry 10 --retry-all-errors --retry-delay 1 localhost:8080/healthz
+          curl --silent --show-error --fail localhost:8080/login | tee login.json
+          jq --exit-status '.logged_in == false' login.json
+          docker exec agent sh -c 'id && codex --version && git --version'
 
   publish:
     if: github.event_name != 'pull_request'
