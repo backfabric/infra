@@ -297,6 +297,8 @@ let
     runtimeInputs = [
       pkgs.jq
       pkgs.coreutils
+      # cmp: the key set is replaced only when it changed.
+      pkgs.diffutils
     ];
     text = ''
       export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
