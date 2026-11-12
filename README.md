@@ -44,7 +44,8 @@ requires them there for the flake to be `github:backfabric/infra`.
   [replacing a failed disk](docs/disk-replacement.md),
   [unlocking the disks over SSH](docs/initrd-unlock.md),
   [managing secrets](docs/secrets.md),
-  [OpenBao](docs/openbao.md);
+  [OpenBao](docs/openbao.md),
+  [the audit telemetry collector](docs/otel.md);
   architectural decisions in [docs/adr/](docs/adr/).
 
 ## Private repository
@@ -138,6 +139,20 @@ nix flake init -t github:backfabric/infra
   `/var/log/openbao/audit.log` (values HMACed, rotated daily, 30 kept); a
   raft snapshot daily in `/var/lib/openbao-snapshots` (14 kept). See
   [docs/openbao.md](docs/openbao.md).
+- `otel`: an [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)
+  on the host for audit telemetry
+  ([ADR 0021](docs/adr/0021-audit-telemetry-collector-on-host.md)), the
+  upstream `services.opentelemetry-collector` with the `otelcol-k8s`
+  distribution. OTLP gRPC 4317 and HTTP 4318, TLS only with a certificate
+  for `otel-collector.otel.svc` and 127.0.0.1 from OpenBao's CA (generated
+  by `backfabric keygen`), on 127.0.0.1 and the node address, open only on
+  `cni0`; pods reach it through a Service without selector. Every sender
+  authenticates with a projected service account token for the audience
+  `otel-collector`; the Collector stamps the verified namespace and service
+  account onto the data, replacing what the sender claims, masks
+  credentials, and writes everything to an append-only archive of OTLP JSON
+  lines in `/var/log/otel-collector` (root only, one file per signal,
+  rotated at 100 MB, kept 365 days). See [docs/otel.md](docs/otel.md).
 
 ## Checks
 

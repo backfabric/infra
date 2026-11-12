@@ -69,7 +69,8 @@ service account that logs in therefore needs the ClusterRole
 
 `backfabric keygen` generates a CA (ECDSA P-256, 10 years) and a server
 certificate (ECDSA P-256, 3 years) for `openbao.openbao.svc`,
-`openbao.openbao.svc.cluster.local` and `127.0.0.1`. Clients trust the CA,
+`openbao.openbao.svc.cluster.local` and `127.0.0.1`. The same CA signs the
+OpenTelemetry Collector's certificate ([otel.md](otel.md#tls)). Clients trust the CA,
 `openbao-ca-cert`. The CA's key, `openbao-ca-key`, is in
 `secrets/admin.yaml`, which only the admins can decrypt; hosts never need
 it. Check the certificate on the host (or anywhere with OpenSSL or
@@ -95,12 +96,12 @@ The deployment restarts OpenBao with the new certificate.
 
 To replace the CA as well (e.g. after its key was readable by hosts:
 earlier versions kept `openbao-ca-key` in `secrets/common.yaml`, and the git
-history still has it there), remove all four and run `keygen`; clients that
-trust the old CA need the new `openbao-ca-cert`:
+history still has it there), remove it and every certificate it signed and
+run `keygen`; clients that trust the old CA need the new `openbao-ca-cert`:
 
 ```sh
 sops unset secrets/admin.yaml '["openbao-ca-key"]'
-for name in openbao-ca-cert openbao-tls-key openbao-tls-cert; do
+for name in openbao-ca-cert openbao-tls-key openbao-tls-cert otel-tls-key otel-tls-cert; do
   sops unset secrets/common.yaml "[\"$name\"]"
 done
 backfabric keygen
