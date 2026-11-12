@@ -114,13 +114,14 @@ in
   options.backfabric.k3s = {
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.k3s_1_35;
-      defaultText = lib.literalExpression "pkgs.k3s_1_35";
+      default = pkgs.k3s_1_36;
+      defaultText = lib.literalExpression "pkgs.k3s_1_36";
       description = ''
         The k3s package. Pinned to a minor version rather than `pkgs.k3s`, so
         that a `nix flake update` of nixpkgs never upgrades the cluster to the
         next minor version by accident; k3s minor versions must be upgraded one
-        at a time.
+        at a time. The default is the newest minor version of the NixOS stable
+        release (ADR 0002).
       '';
     };
   };

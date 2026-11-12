@@ -230,11 +230,20 @@ ssh node1 tail -f /var/lib/rancher/k3s/server/logs/audit.log
 ```
 
 The k3s version is pinned to a minor release
-(`backfabric.k3s.package`, default `pkgs.k3s_1_35`), so `nix flake update`
-only brings patch releases. To upgrade, set the next minor version (one at
-a time) in the host's configuration, e.g.
-`backfabric.k3s.package = pkgs.k3s_1_36;` (with `pkgs` among the module
-arguments), and deploy.
+(`backfabric.k3s.package`, default `pkgs.k3s_1_36`), so `nix flake update`
+only brings patch releases. A new minor version arrives as a new default of
+this flake, or by setting it in the host's configuration, e.g.
+`backfabric.k3s.package = pkgs.k3s_1_37;` (with `pkgs` among the module
+arguments). Minor versions are upgraded one at a time and cannot be
+downgraded: the new version migrates etcd, so take a snapshot first and
+deploy with `switch`, not `test` (a reboot after `test` would start the old
+version on the migrated datastore):
+
+```sh
+ssh node1 k3s etcd-snapshot save --name before-upgrade
+backfabric deploy node1
+ssh node1 kubectl version
+```
 
 If the hosts were installed before a cluster-wide secret existed (e.g.
 OpenBao's, added after the k3s token), create the missing ones once in the

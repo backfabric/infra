@@ -121,9 +121,10 @@ nix flake init -t github:backfabric/infra
   rejected. Deviations from the guide:
   [ADR 0017](docs/adr/0017-cluster-hardening-defaults.md). Run `kubectl` on
   the host as root (`ssh <host>`, then `kubectl get nodes`).
-  `backfabric.k3s.package` (default `pkgs.k3s_1_35`) pins the k3s minor
-  version: upgrade one minor version at a time. Joining more nodes is not
-  implemented yet.
+  `backfabric.k3s.package` (default `pkgs.k3s_1_36`, the newest minor
+  version of the NixOS stable release) pins the k3s minor version: upgrade
+  one minor version at a time, with `switch`, never `test` (see the
+  template's README). Joining more nodes is not implemented yet.
 - `openbao`: [OpenBao](https://openbao.org/) on the host
   ([ADR 0009](docs/adr/0009-openbao-on-host-with-eso.md)), the upstream
   `services.openbao` with raft storage, no UI. Static seal with
