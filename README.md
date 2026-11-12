@@ -39,13 +39,18 @@ requires them there for the flake to be `github:backfabric/infra`.
 - `nix/templates/default/`: the skeleton of the private repository, see below;
   evaluated by `checks.x86_64-linux.template-empty` and
   `checks.x86_64-linux.template-with-host`.
+- `nix/images/`: the agents' container image `ghcr.io/backfabric/agent`
+  (Codex and an HTTP supervisor, run as an Agent Substrate actor),
+  `packages.x86_64-linux.agent-image`, built and published by CI, see
+  [docs/agent-image.md](docs/agent-image.md).
 - `docs/`: operational runbooks:
   [the fleet dev shell and installing a host](docs/fleet-shell.md),
   [replacing a failed disk](docs/disk-replacement.md),
   [unlocking the disks over SSH](docs/initrd-unlock.md),
   [managing secrets](docs/secrets.md),
   [OpenBao](docs/openbao.md),
-  [the audit telemetry collector](docs/otel.md);
+  [the audit telemetry collector](docs/otel.md),
+  [the agent image](docs/agent-image.md);
   architectural decisions in [docs/adr/](docs/adr/).
 
 ## Private repository
@@ -156,7 +161,9 @@ nix flake init -t github:backfabric/infra
 
 ## Checks
 
-CI only evaluates; nothing is built. Run the same checks locally with:
+CI evaluates; the only thing it builds is the agent image
+([ADR 0022](docs/adr/0022-ci-builds-the-agent-image.md)). Run the same
+checks locally with:
 
 ```sh
 nix flake check --no-build --all-systems
