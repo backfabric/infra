@@ -8,7 +8,6 @@
   dockerTools,
   stdenvNoCC,
   fetchurl,
-  writeTextDir,
   bash,
   coreutils,
   findutils,
@@ -55,16 +54,20 @@ let
     };
   });
 
-  users = [
-    (writeTextDir "etc/passwd" ''
-      root:x:0:0:root:/root:${bash}/bin/bash
-      agent:x:${toString uid}:${toString gid}:agent:${home}:${bash}/bin/bash
-    '')
-    (writeTextDir "etc/group" ''
-      root:x:0:
-      agent:x:${toString gid}:
-    '')
-  ];
+  # Written as regular files, not as store paths in `contents`: those become
+  # absolute symlinks into /nix/store, and Agent Substrate's atelet reads
+  # etc/passwd and etc/group to resolve the image's USER through os.Root,
+  # inside each layer, so it rejects them ("path escapes from parent";
+  # cmd/atelet/oci.go, internal/imagecache/imagefile.go at v1.0.0) and the
+  # actor crashes before it starts.
+  passwd = ''
+    root:x:0:0:root:/root:${bash}/bin/bash
+    agent:x:${toString uid}:${toString gid}:agent:${home}:${bash}/bin/bash
+  '';
+  group = ''
+    root:x:0:
+    agent:x:${toString gid}:
+  '';
 in
 dockerTools.buildLayeredImage {
   name = "ghcr.io/backfabric/agent";
@@ -79,10 +82,18 @@ dockerTools.buildLayeredImage {
     cacert
     python3Minimal
     codex
-  ]
-  ++ users;
+  ];
   fakeRootCommands = ''
-    mkdir -p .${home} tmp usr/bin
+    mkdir -p etc .${home} tmp usr/bin
+    printf %s ${lib.escapeShellArg passwd} > etc/passwd
+    printf %s ${lib.escapeShellArg group} > etc/group
+    chmod 0644 etc/passwd etc/group
+    for f in etc/passwd etc/group; do
+      if [ -L "$f" ] || [ ! -f "$f" ]; then
+        echo "$f must be a regular file (atelet rejects symlinks)" >&2
+        exit 1
+      fi
+    done
     chown ${toString uid}:${toString gid} .${home}
     chmod 1777 tmp
     ln -s ${coreutils}/bin/env usr/bin/env
