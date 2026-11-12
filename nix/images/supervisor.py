@@ -216,6 +216,10 @@ def log(**fields):
 
 
 if __name__ == "__main__":
+    # Both may be on an empty volume mounted at HOME; Codex needs CODEX_HOME
+    # to exist.
+    os.makedirs(os.environ["CODEX_HOME"], mode=0o700, exist_ok=True)
     os.makedirs(WORKDIR, exist_ok=True)
+    server = ThreadingHTTPServer(("", PORT), Handler)
     log(msg="listening", port=PORT, workdir=WORKDIR, task_timeout=TASK_TIMEOUT)
-    ThreadingHTTPServer(("", PORT), Handler).serve_forever()
+    server.serve_forever()
