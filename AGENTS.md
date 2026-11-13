@@ -26,6 +26,10 @@ in the same PR.
 - One GitHub issue and one PR per change. Every PR targets `main`; work that
   depends on an unmerged PR waits for its merge and is then branched from
   `main`.
+- A PR is atomic: one subsystem or one behaviour. A refactor gets its own PR;
+  a shared mechanism that changes an ADR lands in its own PR before its first
+  user. Past about 500 changed lines of code (docs excluded), look for the
+  split before opening the PR.
 - The user reviews and merges every PR; agents push only to their own branch.
 - Conventional Commits for every commit message and PR title (`feat:`,
   `fix:`, `refactor:`, `docs:`, `chore:`, `ci:`). Issue titles are plain
