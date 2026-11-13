@@ -1,6 +1,10 @@
+---
+status: amended by ADR 0024
+---
+
 # Cluster hardening defaults
 
-The `k3s` subsystem follows the [K3s CIS hardening guide](https://docs.k3s.io/security/hardening-guide) ("v1.29 and Newer"), so the cluster's hardening is the documented, benchmarked one rather than our own. The guide's settings are applied unchanged: `protect-kernel-defaults` with the guide's kernel parameters, Secrets encryption, the admission plugins `NodeRestriction` and `EventRateLimit`, Pod Security Admission `restricted` (enforce, audit, warn) with kube-system exempt, the audit policy at level `Metadata` with the log in `/var/lib/rancher/k3s/server/logs` (mode 0700, 30 days, 10 files of 100 MB), `service-account-extend-token-expiration=false`, `terminated-pod-gc-threshold=100`, and the kubelet's `streaming-connection-idle-timeout` and TLS cipher suites. Only upstream options are used: `services.k3s` options where the NixOS module has them, k3s flags otherwise, and the policy files in the Nix store.
+The `k3s` subsystem follows the [K3s CIS hardening guide](https://docs.k3s.io/security/hardening-guide) ("v1.29 and Newer"), so the cluster's hardening is the documented, benchmarked one rather than our own. The guide's settings are applied unchanged: `protect-kernel-defaults` with the guide's kernel parameters, Secrets encryption, the admission plugins `NodeRestriction` and `EventRateLimit`, Pod Security Admission `restricted` (enforce, audit, warn) with kube-system exempt (and, since ADR 0024, the namespaces subsystems list, whose pods an admission policy limits to digest-pinned images), the audit policy at level `Metadata` with the log in `/var/lib/rancher/k3s/server/logs` (mode 0700, 30 days, 10 files of 100 MB), `service-account-extend-token-expiration=false`, `terminated-pod-gc-threshold=100`, and the kubelet's `streaming-connection-idle-timeout` and TLS cipher suites. Only upstream options are used: `services.k3s` options where the NixOS module has them, k3s flags otherwise, and the policy files in the Nix store.
 
 ## Deviations and additions
 
