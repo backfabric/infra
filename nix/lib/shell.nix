@@ -1,7 +1,8 @@
 # Bash functions shared by the oneshots of the subsystems (OpenBao's, the
-# Collector's key copy, Agent Substrate's install). They wait for what they
-# need for a bounded time and then fail, so that a deployment reports the
-# failed unit instead of waiting for it.
+# Collector's key copy, Agent Substrate's install, the platform
+# PostgreSQL's credentials). They wait for what they need for a bounded
+# time and then fail, so that a deployment reports the failed unit instead
+# of waiting for it.
 {
   # wait_until <seconds> <what> <command>...: runs the command every 2
   # seconds until it succeeds; fails after <seconds>.
