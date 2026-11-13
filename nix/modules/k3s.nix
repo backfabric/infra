@@ -19,7 +19,9 @@
 #   - etcd snapshots with k3s's defaults: every 12 hours, the last 5, in
 #     /var/lib/rancher/k3s/server/db/snapshots;
 #   - the hardening guide's flags, kernel parameters, Pod Security Admission
-#     (restricted outside kube-system), and audit log; plus
+#     (restricted outside kube-system and the namespaces other subsystems
+#     exempt, `podSecurityExemptions`, whose pods an admission policy
+#     limits to listed images), and audit log; plus
 #     DenyServiceExternalIPs and an admission policy that rejects NodePort
 #     and LoadBalancer Services, so nothing in the cluster is reachable from
 #     outside;
@@ -98,7 +100,7 @@ let
             exemptions = {
               usernames = [ ];
               runtimeClasses = [ ];
-              namespaces = [ "kube-system" ];
+              namespaces = [ "kube-system" ] ++ lib.attrNames cfg.podSecurityExemptions;
             };
           };
         }
@@ -159,6 +161,86 @@ let
   deployedManifests = lib.mapAttrsToList (
     _: m: lib.removeSuffix ".${lib.last (lib.splitString "." m.target)}" m.target
   ) (lib.filterAttrs (_: m: m.enable) config.services.k3s.manifests);
+
+  # Restricts the pods of the namespaces in podSecurityExemptions (not
+  # kube-system, whose images k3s ships) to the images listed for each: the
+  # images of all containers, init containers and ephemeral containers, on
+  # every create and update of a pod and of its ephemeral containers. Pods
+  # only: a controller's pod template is checked when it creates the pods.
+  exemptImagesPolicy = "backfabric-exempt-namespace-images";
+  exemptImagesManifest = [
+    {
+      apiVersion = "admissionregistration.k8s.io/v1";
+      kind = "ValidatingAdmissionPolicy";
+      metadata.name = exemptImagesPolicy;
+      spec = {
+        failurePolicy = "Fail";
+        matchConstraints = {
+          namespaceSelector.matchExpressions = [
+            {
+              key = "kubernetes.io/metadata.name";
+              operator = "In";
+              values = lib.attrNames cfg.podSecurityExemptions;
+            }
+          ];
+          resourceRules = [
+            {
+              apiGroups = [ "" ];
+              apiVersions = [ "v1" ];
+              operations = [
+                "CREATE"
+                "UPDATE"
+              ];
+              resources = [
+                "pods"
+                "pods/ephemeralcontainers"
+              ];
+            }
+          ];
+        };
+        variables = [
+          {
+            name = "allowed";
+            # A CEL map of lists of strings, written as JSON.
+            expression = "${
+              builtins.toJSON (lib.mapAttrs (_: e: e.images) cfg.podSecurityExemptions)
+            }[request.namespace]";
+          }
+          {
+            name = "images";
+            expression = lib.concatStringsSep " + " [
+              "object.spec.containers.map(c, c.image)"
+              "(has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : [])"
+              "(has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers.map(c, c.image) : [])"
+            ];
+          }
+          {
+            name = "denied";
+            expression = "variables.images.filter(i, !(i in variables.allowed))";
+          }
+        ];
+        validations = [
+          {
+            expression = "size(variables.denied) == 0";
+            messageExpression = "'images not allowed in namespace ' + request.namespace + ' (backfabric.k3s.podSecurityExemptions): ' + variables.denied.join(', ')";
+            reason = "Forbidden";
+          }
+        ];
+      };
+    }
+    {
+      apiVersion = "admissionregistration.k8s.io/v1";
+      kind = "ValidatingAdmissionPolicyBinding";
+      metadata.name = exemptImagesPolicy;
+      spec = {
+        policyName = exemptImagesPolicy;
+        validationActions = [
+          (if cfg.denyUnlistedImages then "Deny" else "Warn")
+          "Audit"
+        ];
+      };
+    }
+  ];
 in
 {
   options.backfabric.k3s = {
@@ -195,6 +277,43 @@ in
         deployed manifests or k3s's packaged components (coredns, ...).
       '';
     };
+
+    podSecurityExemptions = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options.images = lib.mkOption {
+            type = lib.types.listOf (lib.types.strMatching ".+@sha256:[0-9a-f]{64}");
+            description = ''
+              The only images pods in the namespace may run, as exact
+              references pinned by digest (`<name>[:<tag>]@sha256:<64 hex>`).
+            '';
+          };
+        }
+      );
+      default = { };
+      description = ''
+        Namespaces exempt from Pod Security Admission, besides kube-system,
+        by name: their pods are admitted whatever their security context.
+        For subsystems whose upstream workloads cannot pass the `restricted`
+        profile (host paths, root, added capabilities); each entry is set by
+        the module that needs it, with its reason. In exchange, the
+        admission policy `${exemptImagesPolicy}` limits the namespace's
+        pods to `images` (see `denyUnlistedImages`).
+      '';
+    };
+
+    denyUnlistedImages = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Whether `${exemptImagesPolicy}` rejects a pod in a namespace of
+        `podSecurityExemptions` whose images are not all in its `images`.
+        Off, the API server admits the pod with a warning to the client and
+        an annotation in the audit log
+        (`validation.policy.admission.k8s.io/validation_failure`): to try a
+        new list without blocking anything.
+      '';
+    };
   };
 
   config = {
@@ -203,6 +322,11 @@ in
         assertion = lib.intersectLists deployedManifests cfg.removedManifests == [ ];
         message = "backfabric.k3s.removedManifests contains deployed k3s manifests: ${lib.concatStringsSep ", " (lib.intersectLists deployedManifests cfg.removedManifests)}";
       }
+    ];
+
+    # The image policy exists only while a namespace is exempt.
+    backfabric.k3s.removedManifests = lib.mkIf (cfg.podSecurityExemptions == { }) [
+      exemptImagesPolicy
     ];
 
     sops.secrets.k3s-token = {
@@ -285,6 +409,12 @@ in
       ];
       # Deployed by k3s from /var/lib/rancher/k3s/server/manifests, as the
       # guide deploys its policies.
+      # The image policy's file sorts before the subsystems' own
+      # (`substrate-*`), and k3s applies the directory in name order
+      # (pkg/deploy/controller.go): it exists before the pods it checks.
+      manifests.${exemptImagesPolicy} = lib.mkIf (cfg.podSecurityExemptions != { }) {
+        content = exemptImagesManifest;
+      };
       manifests.${externalServicesPolicy}.content = [
         {
           apiVersion = "admissionregistration.k8s.io/v1";

@@ -113,7 +113,9 @@ nix flake init -t github:backfabric/infra
   the last 5, in `/var/lib/rancher/k3s/server/db/snapshots`). Hardened as
   the [K3s CIS hardening guide](https://docs.k3s.io/security/hardening-guide)
   says: `protect-kernel-defaults` with its kernel parameters, Pod Security
-  Admission `restricted` outside kube-system, EventRateLimit, every API
+  Admission `restricted` outside kube-system and the namespaces subsystems
+  exempt (`backfabric.k3s.podSecurityExemptions`, each limited to
+  digest-pinned images, ADR 0024), EventRateLimit, every API
   request audited at level Metadata to
   `/var/lib/rancher/k3s/server/logs/audit.log`. Nothing in the cluster is
   reachable from outside: the firewall opens port 6443 only on `cni0`, for
