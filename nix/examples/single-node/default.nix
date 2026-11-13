@@ -68,6 +68,19 @@
     smokeTest.enable = true;
   };
 
+  # The platform PostgreSQL with one database, whose credentials go to the
+  # Secret `postgres-example` in the namespace `example`.
+  backfabric.postgres = {
+    enable = true;
+    databases = [
+      {
+        name = "example";
+        owner = "example";
+        namespace = "example";
+      }
+    ];
+  };
+
   # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,
   # with the report that `backfabric probe` generates with nixos-facter. This
   # excerpt has the shape of a real report of a Hetzner server (fields the

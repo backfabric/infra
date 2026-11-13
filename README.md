@@ -22,6 +22,9 @@ requires them there for the flake to be `github:backfabric/infra`.
   NixOS modules of the inputs its subsystem needs (e.g. disko for `disks`);
   consumers only import modules from this flake.
 - `nixosModules.default` imports every subsystem module.
+- `nix/packages/`: what subsystem modules deploy and build from upstream
+  releases, e.g. Agent Substrate (patched manifests, images) and
+  CloudNativePG's manifest with its images pinned by digest.
 - `nix/fleet/`: the fleet dev shell for the operator machine,
   `lib.mkFleetShell { pkgs, nixosConfigurations }`, with a generated SSH
   config and the operator command `backfabric` (`nix/fleet/cli/`; subcommands
@@ -54,6 +57,7 @@ requires them there for the flake to be `github:backfabric/infra`.
   [managing secrets](docs/secrets.md),
   [OpenBao](docs/openbao.md),
   [the audit telemetry collector](docs/otel.md),
+  [the platform PostgreSQL](docs/postgres.md),
   [the agent image](docs/agent-image.md),
   [Agent Substrate](docs/substrate.md);
   architectural decisions in [docs/adr/](docs/adr/).
@@ -182,6 +186,16 @@ nix flake init -t github:backfabric/infra
   and `kubectl ate` on the host. `ate-system` and the namespaces of
   `workerPoolNamespaces` are exempt from Pod Security; their pods may only
   run digest-pinned images. See [docs/substrate.md](docs/substrate.md).
+- `postgres` (off by default): a PostgreSQL for platform services in the
+  cluster, run by [CloudNativePG](https://cloudnative-pg.io/)
+  ([ADR 0025](docs/adr/0025-platform-postgres-with-cloudnativepg.md)) from
+  its release manifest with images pinned by digest. One Cluster,
+  `platform` in `postgres`, one instance on a static local volume in
+  `/var/lib/postgres-platform`, TLS, no network superuser, no backups yet.
+  `backfabric.postgres.databases` declares each database, its owner and
+  the namespace of the service that uses it: only those namespaces may
+  connect, and each gets a Secret with the connection details and a
+  generated password. See [docs/postgres.md](docs/postgres.md).
 
 ## Checks
 
