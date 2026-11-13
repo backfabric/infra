@@ -5,14 +5,18 @@ name: agent-image
 on:
   pull_request:
     paths:
+      - agent/**
       - nix/images/**
+      - nix/packages/a2a-sdk.nix
       - flake.nix
       - flake.lock
       - .github/workflows/agent-image.yml
   push:
     branches: [main]
     paths:
+      - agent/**
       - nix/images/**
+      - nix/packages/a2a-sdk.nix
       - flake.nix
       - flake.lock
       - .github/workflows/agent-image.yml
@@ -32,9 +36,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
       - name: Build image
-        run: nix build .#packages.x86_64-linux.agent-image
-      # The supervisor starts as the agent user and answers; Codex runs.
-      # Nothing here talks to OpenAI.
+        run: |
+          nix build .#packages.x86_64-linux.agent-image
+          # The compressed size of the image, its layers' total.
+          du --apparent-size --block-size=1M --dereference result
+      # The supervisor starts as the agent user and answers A2A; Codex runs.
+      # Nothing here talks to OpenAI: without a login a message ends in
+      # auth-required before Codex runs.
       - name: Run image
         run: |
           image=$(docker load <result | sed -n 's/^Loaded image: //p')
@@ -45,6 +53,13 @@ jobs:
           curl --silent --show-error --fail --retry 10 --retry-all-errors --retry-delay 1 localhost:8080/healthz
           curl --silent --show-error --fail localhost:8080/login | tee login.json
           jq --exit-status '.logged_in == false and .status == "Not logged in"' login.json
+          curl --silent --show-error --fail localhost:8080/.well-known/agent-card.json | tee card.json
+          jq --exit-status '.supportedInterfaces[0].protocolBinding == "JSONRPC" and .supportedInterfaces[0].protocolVersion == "1.0"' card.json
+          curl --silent --show-error --fail localhost:8080/ \
+            --header 'Content-Type: application/json' --header 'A2A-Version: 1.0' \
+            --data '{"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {"message": {"role": "ROLE_USER", "messageId": "m1", "contextId": "c1", "parts": [{"text": "Say hello"}]}}}' |
+            tee send.json
+          jq --exit-status '.result.task.status.state == "TASK_STATE_AUTH_REQUIRED"' send.json
           docker exec agent sh -c 'id && codex --version && git --version'
 
   publish:

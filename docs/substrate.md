@@ -166,7 +166,7 @@ node1). Suspended actors resume on the new pool's workers.
 ### Example: agent-0
 
 One actor of this repository's [agent image](agent-image.md) (Codex behind
-a small supervisor, port 8080), logged in once with the user's ChatGPT
+an A2A supervisor, port 8080), logged in once with the user's ChatGPT
 subscription and kept across suspends. With `workerPoolNamespaces = [
 "agents" ];` on the host, the private repository applies:
 
@@ -200,8 +200,10 @@ spec:
 
 `actor-template.yaml` (`kubectl ate create actor-template -f`, the
 template's protojson form): the image's entrypoint, the supervisor; its
-home, with Codex's login and the work directory, on a `durableDir`; memory
-snapshots.
+home, with Codex's login and session and the work directory, on a
+`durableDir`; memory snapshots. The image is the one published for a commit
+of this repository ([Published images](agent-image.md#published-images)),
+pinned by digest.
 
 ```yaml
 metadata:
@@ -212,7 +214,7 @@ workerSelector:
     workload: agents
 containers:
   - name: agent
-    image: ghcr.io/backfabric/agent@sha256:1c53b7ed7e883c46a42de74fd8651b35123ebaef911175498a8e91363f86b82d
+    image: ghcr.io/backfabric/agent@sha256:<digest>
     wakeupProbe:
       httpGet: {path: /healthz, port: 8080}
     volumeMounts:
@@ -272,10 +274,24 @@ enter `user_code`. Then:
 
 ```sh
 curl -s localhost:8000/login             # "logged_in": true
-curl -s -X POST localhost:8000/task -d '{"prompt": "Say hello"}'   # "exit_code": 0, "final_message"
+curl -s localhost:8000/.well-known/agent-card.json   # JSONRPC, protocolVersion 1.0
+
+a2a() {
+  curl -s localhost:8000/ -H 'Content-Type: application/json' -H 'A2A-Version: 1.0' -d "$1"
+}
+a2a '{"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {
+  "message": {"role": "ROLE_USER", "messageId": "m1", "contextId": "c1",
+    "parts": [{"text": "Say hello"}]}}}'
+# .result.task: TASK_STATE_COMPLETED, the answer in artifacts[0].parts[0].text
+
 kubectl ate suspend actor agent-0 -a agents --mode=sync
 curl -s localhost:8000/login             # still logged in, after the resume
-curl -s -X POST localhost:8000/task -d '{"prompt": "What did I ask you before?"}'
+a2a '{"jsonrpc": "2.0", "id": 2, "method": "SendMessage", "params": {
+  "message": {"role": "ROLE_USER", "messageId": "m2", "contextId": "c1",
+    "parts": [{"text": "What did I ask you before?"}]},
+  "configuration": {"returnImmediately": true}}}'
+# .result.task: TASK_STATE_WORKING; then, with its id, until COMPLETED:
+a2a '{"jsonrpc": "2.0", "id": 3, "method": "GetTask", "params": {"id": "<task id>"}}'
 ```
 
 The gateway caches a missing policy as deny for 10 seconds, so wait that

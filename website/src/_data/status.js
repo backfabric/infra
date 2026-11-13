@@ -53,8 +53,8 @@ export default {
     },
     {
       title: "Agent image",
-      text: "Codex and a supervisor, built by Nix, published to ghcr.io/backfabric/agent with build provenance.",
-      links: [pr(54), pr(58), adr("0022", "ci-builds-the-agent-image")],
+      text: "Codex behind an A2A 1.0 supervisor, built by Nix, published to ghcr.io/backfabric/agent with build provenance.",
+      links: [pr(54), pr(58), pr(82), adr("0022", "ci-builds-the-agent-image")],
     },
     {
       title: "Clean switch-off",
