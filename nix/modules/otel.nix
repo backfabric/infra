@@ -291,6 +291,7 @@ let
   };
 
   k3s = lib.getExe' config.backfabric.k3s.package "k3s";
+  shell = import ../lib/shell.nix;
 
   jwks = pkgs.writeShellApplication {
     name = "otel-jwks";
@@ -303,19 +304,10 @@ let
     text = ''
       export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-      # api_ready: whether the API server answers with the admin kubeconfig.
-      api_ready() {
-        [[ -s $KUBECONFIG ]] && ${k3s} kubectl get --raw /readyz >/dev/null 2>&1
-      }
+      ${shell.waitUntil}
+      ${shell.apiReady k3s}
 
-      deadline=$((SECONDS + 120))
-      until api_ready; do
-        if ((SECONDS >= deadline)); then
-          echo "Gave up waiting for the k3s API with $KUBECONFIG; is k3s running? systemctl status k3s" >&2
-          exit 1
-        fi
-        sleep 2
-      done
+      wait_until 120 "the k3s API with $KUBECONFIG; is k3s running? systemctl status k3s" api_ready
 
       actual=$(${k3s} kubectl get --raw /.well-known/openid-configuration | jq -r .issuer)
       if [[ $actual != "${issuer}" ]]; then
