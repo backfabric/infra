@@ -20,9 +20,9 @@
 }
 
 :root {
-  --night: #12081f;
-  --night-2: #1a0c2e;
-  --night-3: #241240;
+  --night: #100926;
+  --night-2: #180e36;
+  --night-3: #231449;
   --violet: #6a2bd9;
   --violet-hi: #b98cff;
   --pink: #ff4f9a;
@@ -90,6 +90,9 @@ html {
 }
 
 body {
+  /* A column, so that the footer sits at the bottom of a short page. */
+  display: flex;
+  flex-direction: column;
   margin: 0;
   min-height: 100vh;
   font-size: 1.0625rem;
@@ -158,6 +161,8 @@ h3 {
 }
 
 main {
+  flex: 1 0 auto;
+  width: 100%;
   overflow-x: clip;
 }
 main:focus {
@@ -273,23 +278,34 @@ main:focus {
   color: var(--muted);
 }
 
+/* Words picked out of a heading in the colours of the sky. */
 .hl-pink,
 .hl-teal,
-.hl-orange {
-  text-shadow: 0 0 0.35em currentColor;
+.hl-orange,
+.hl-sun {
+  background: var(--hl);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 .hl-pink {
-  color: var(--pink);
+  --hl: linear-gradient(100deg, #ff2d6f, #ff6a5c 60%, #ffab66);
 }
 .hl-teal {
-  color: var(--teal);
+  --hl: linear-gradient(100deg, #3ff3e6, #62c4ff);
 }
 .hl-orange {
-  color: var(--orange);
+  --hl: linear-gradient(100deg, #ffd36e, #ff8a3d 55%, #ff4f9a);
 }
+.hl-sun {
+  --hl: linear-gradient(180deg, #fff8e0 22%, #ffd98a 55%, #ff9a6c 88%);
+}
+/* Outlined words: the stroke is drawn first and the fill covers its inner
+   half, which hides the seams where a letter's strokes overlap. */
 .outline {
-  color: transparent;
-  -webkit-text-stroke: 2px var(--cream);
+  color: var(--bg);
+  -webkit-text-stroke: 4px var(--cream);
+  paint-order: stroke fill;
 }
 
 /* ---------- Buttons ---------- */
@@ -352,35 +368,80 @@ main:focus {
   align-items: start;
   overflow: hidden;
   isolation: isolate;
-  background: var(--night);
+  /* The top of the sky: shown while the artwork loads and where it sinks. */
+  background: #110a3a;
 }
-.hero-sky {
-  position: absolute;
-  inset: 0;
-  z-index: -3;
-  background:
-    radial-gradient(120% 60% at 65% 62%, rgb(255 110 90 / 0.55), transparent 60%),
-    linear-gradient(180deg, #0b0519 0%, #1f0a40 24%, #4a1470 44%, #a3207f 58%, #ff5a6e 68%, #ff9a58 71%);
-}
-.scene {
+
+/* The artwork (src/_data/scene.js): the layers of one picture, back to
+   front. Sky and city share a frame and a focal point, so the sun stays in
+   view and above its reflection at any size. */
+.hero-art,
+.finale-art {
   position: absolute;
   inset: 0;
   z-index: -2;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.art {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  object-fit: cover;
+  object-position: 64% 100%;
 }
-.scene .layer {
-  transform-box: view-box;
+.palm,
+.thicket {
+  position: absolute;
+  width: auto;
+  max-width: none;
 }
-/* Shade behind the copy, for contrast on the bright sky. */
+.palm {
+  bottom: -5%;
+  transform-origin: var(--foot) 100%;
+}
+.thicket {
+  bottom: -1px;
+  height: auto;
+}
+.thicket-left {
+  left: 0;
+  transform: scaleX(-1);
+}
+.thicket-right {
+  right: 0;
+}
+/* As tall as the picture allows, but never so tall on a narrow screen that
+   one crown fills it. */
+.hero .palm-a {
+  right: 5%;
+  height: min(98%, 68vw);
+}
+.hero .palm-b {
+  right: -5%;
+  height: min(70%, 49vw);
+}
+.hero .palm-c {
+  left: -7%;
+  height: min(112%, 78vw);
+}
+.hero .thicket-left {
+  width: clamp(11rem, 30%, 34rem);
+}
+.hero .thicket-right {
+  width: clamp(15rem, 44%, 48rem);
+}
+/* Shade behind the copy and the top bar, for contrast on the bright sky. */
 .hero::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
   background:
-    linear-gradient(90deg, rgb(11 5 25 / 0.82) 0%, rgb(11 5 25 / 0.45) 38%, transparent 62%),
-    linear-gradient(180deg, rgb(11 5 25 / 0.5) 0%, transparent 30%);
+    linear-gradient(90deg, rgb(13 7 40 / 0.72) 0%, rgb(13 7 40 / 0.4) 36%, transparent 60%),
+    linear-gradient(180deg, rgb(13 7 40 / 0.5) 0%, transparent 24%);
   pointer-events: none;
 }
 
@@ -398,7 +459,9 @@ main:focus {
   padding: 0.45rem 0.9rem;
   border: 1px solid rgb(63 243 230 / 0.45);
   border-radius: 999px;
-  background: rgb(11 5 25 / 0.55);
+  background: rgb(13 7 40 / 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   font-family: var(--mono);
   font-size: 0.75rem;
   letter-spacing: 0.18em;
@@ -414,50 +477,51 @@ main:focus {
 }
 
 .wordmark {
+  /* As wide as the word: the gradient is cut to this box. */
+  width: max-content;
   margin: 0;
   font-family: var(--display);
   font-weight: 400;
   font-size: clamp(4.2rem, 15.5vw, 14rem);
-  line-height: 0.82;
+  line-height: 0.86;
   letter-spacing: 0.005em;
   text-transform: uppercase;
+  /* Lit from above like the clouds: cream down to the pink of the horizon. */
   color: var(--cream);
-  text-shadow:
-    0.035em 0.035em 0 var(--hot),
-    0.07em 0.07em 0 #5b1a8f,
-    0 0 0.6em rgb(255 79 154 / 0.35);
-}
-.wordmark span {
-  color: var(--cream);
+  background: linear-gradient(180deg, #fffaf0 16%, #ffe3b4 50%, #ffa48c 76%, #ff5f9e 98%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0.035em 0 rgb(74 18 104 / 0.6)) drop-shadow(0 0.08em 0.3em rgb(13 7 40 / 0.55));
 }
 
 .pitch {
-  margin: 1.75rem 0 0;
+  margin: 1.5rem 0 0;
   font-family: var(--display);
   font-size: clamp(1.6rem, 3.4vw, 2.8rem);
   line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.02em;
   color: var(--cream);
+  text-shadow: 0 2px 18px rgb(13 7 40 / 0.6);
 }
 .pitch em {
   font-style: normal;
   color: var(--teal);
-  text-shadow: 0 0 0.4em rgb(63 243 230 / 0.6);
 }
 
 .lede {
   max-width: 36rem;
   margin: 1.1rem 0 0;
   font-size: clamp(1.05rem, 1.5vw, 1.25rem);
-  color: #f3e7ff;
-  text-shadow: 0 1px 12px rgb(11 5 25 / 0.9);
+  color: #f6ecff;
+  text-shadow: 0 1px 14px rgb(13 7 40 / 0.9);
 }
 
 .scroll-cue {
   position: absolute;
   left: 50%;
-  bottom: 1.5rem;
+  bottom: 2.4rem;
   width: 1.6rem;
   height: 2.6rem;
   margin-left: -0.8rem;
@@ -509,7 +573,7 @@ main:focus {
   position: relative;
   max-width: var(--wrap);
   margin: 0 auto;
-  padding: clamp(5rem, 11vw, 9rem) var(--pad);
+  padding: clamp(3.5rem, 7vw, 6rem) var(--pad);
 }
 .section-head {
   margin-bottom: clamp(2.5rem, 5vw, 4rem);
@@ -1001,32 +1065,60 @@ main:focus {
   color: #a995c9;
 }
 
-/* Finale */
+/* Finale: the same shore later in the evening. Only the still layers are
+   darkened; a filter over the swaying palms would be redrawn every frame. */
 .finale {
-  max-width: none;
-  padding-inline: 0;
-  padding-bottom: 0;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: min(100svh, 60rem);
+  margin-top: clamp(2rem, 6vw, 5rem);
+  text-align: center;
+  background: #0b0628;
+}
+.finale .art {
+  filter: brightness(0.68) saturate(1.15) hue-rotate(-14deg);
+}
+.finale .palm-a {
+  right: 4%;
+  height: 90%;
+}
+.finale .palm-b {
+  right: -6%;
+  height: 60%;
+}
+.finale .palm-c {
+  left: -2%;
+  height: 78%;
+}
+.finale .thicket-left {
+  width: clamp(13rem, 36%, 40rem);
+}
+.finale .thicket-right {
+  width: clamp(13rem, 36%, 40rem);
+}
+/* The page's night runs into the sky. */
+.finale::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, var(--night) 0%, rgb(16 9 38 / 0.6) 20%, transparent 50%);
+  pointer-events: none;
 }
 .finale-inner {
-  position: relative;
-  overflow: hidden;
-  padding: clamp(5rem, 12vw, 10rem) var(--pad);
-  text-align: center;
-  background:
-    repeating-linear-gradient(180deg, transparent 0 18px, rgb(18 8 31 / 0.35) 18px 22px),
-    radial-gradient(60% 90% at 50% 110%, #ffd36e 0%, #ff8a3d 22%, #ff2d6f 45%, transparent 70%),
-    linear-gradient(180deg, var(--night) 0%, #3a0f5e 60%, #7a1872 100%);
+  padding: clamp(6rem, 13vw, 10rem) var(--pad) 0;
 }
 .finale h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
   font-size: clamp(3rem, 9vw, 8rem);
+  line-height: 0.92;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
   color: var(--cream);
-  text-shadow: 0 0.05em 0 #5b1a8f;
-}
-.finale .hl-pink {
-  color: var(--cream);
-  text-shadow:
-    0 0 0.3em var(--hot),
-    0 0.05em 0 #5b1a8f;
+  filter: drop-shadow(0 0.06em 0.3em rgb(13 7 40 / 0.6));
 }
 .finale .cta {
   justify-content: center;
@@ -1067,6 +1159,7 @@ main:focus {
   margin: 0 auto;
   padding: 7rem var(--pad) 5rem;
 }
+/* A strip of the home page's picture: the same layers as backgrounds. */
 .docs-hero {
   position: relative;
   overflow: hidden;
@@ -1074,29 +1167,21 @@ main:focus {
   border-radius: 1.5rem;
   color: var(--cream);
   background:
-    radial-gradient(circle at 82% 118%, #ffd36e 0, #ff8a3d 9rem, #ff2d6f 14rem, transparent 22rem),
-    linear-gradient(180deg, #120626 0%, #2c0c52 45%, #7a1872 85%, #c2297e 100%);
-  isolation: isolate;
-}
-.docs-hero::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 45%;
-  z-index: -1;
-  background: repeating-linear-gradient(180deg, transparent 0 14px, rgb(18 6 38 / 0.45) 14px 17px);
+    linear-gradient(90deg, rgb(13 7 40 / 0.8) 0%, rgb(13 7 40 / 0.5) 45%, rgb(13 7 40 / 0.05) 80%),
+    url("/assets/scene/palm-b.svg") right 4% bottom -4rem / var(--palm, auto 135%) no-repeat,
+    url("/assets/scene/city.svg") 64% 76% / cover no-repeat,
+    #110a3a url("/assets/scene/sky.svg") 64% 76% / cover no-repeat;
 }
 .docs-hero .eyebrow {
   color: var(--teal);
 }
 .docs-hero h1 {
   font-size: clamp(3.5rem, 9vw, 7rem);
-  text-shadow:
-    0.04em 0.04em 0 var(--hot),
-    0.08em 0.08em 0 #5b1a8f;
+  filter: drop-shadow(0 0.05em 0.3em rgb(13 7 40 / 0.6));
 }
 .docs-hero .intro {
-  color: #f0e3ff;
+  color: #f6ecff;
+  text-shadow: 0 1px 14px rgb(13 7 40 / 0.9);
 }
 .docs-hero a {
   color: var(--cream);
@@ -1385,14 +1470,39 @@ th {
     padding-top: 2rem;
     border-top: 1px solid var(--line);
   }
+  .hero::before {
+    background: linear-gradient(180deg, rgb(13 7 40 / 0.8) 0%, rgb(13 7 40 / 0.5) 50%, transparent 78%);
+  }
+  .hero .palm-c,
+  .finale .palm-c {
+    display: none;
+  }
+  .finale .palm-a {
+    height: min(90%, 110vw);
+  }
+  .finale .palm-b {
+    height: min(60%, 74vw);
+  }
 }
 
 @media (max-width: 640px) {
+  /* No room for the palm beside the text. */
+  .docs-hero {
+    --palm: 0 0;
+  }
   .hero-copy {
     padding-top: 6.5rem;
   }
-  .hero::before {
-    background: linear-gradient(180deg, rgb(11 5 25 / 0.85) 0%, rgb(11 5 25 / 0.55) 55%, transparent 80%);
+  .hero .palm-a {
+    right: -22%;
+    height: min(70%, 150vw);
+  }
+  .hero .palm-b,
+  .finale .palm-b {
+    display: none;
+  }
+  .finale .palm-a {
+    right: -12%;
   }
   .layer-row {
     grid-template-columns: minmax(0, 1fr);
@@ -1422,25 +1532,20 @@ th {
   .dot {
     animation: pulse 2.4s ease-in-out infinite;
   }
-  .scene .twinkle {
-    animation: twinkle 3.2s ease-in-out infinite;
-    animation-delay: var(--d);
-  }
-  .scene .beacon {
-    animation: blink 2.2s steps(1) infinite;
-    animation-delay: var(--d);
-  }
-  .scene .ripple {
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: ripple 4.5s ease-in-out infinite alternate;
-    animation-delay: calc(var(--d) * -1);
-  }
-  .scene .horizon {
-    animation: pulse 4s ease-in-out infinite;
-  }
   .scroll-cue span {
     animation: cue 1.8s ease-in-out infinite;
+  }
+  /* The palms move in the breeze, each at its own pace. */
+  .palm {
+    animation: sway 7s ease-in-out infinite alternate;
+  }
+  .palm-b {
+    animation-duration: 5.6s;
+    animation-delay: -2s;
+  }
+  .palm-c {
+    animation-duration: 8.4s;
+    animation-delay: -4s;
   }
 
   .hero-copy > * {
@@ -1458,23 +1563,16 @@ th {
   .hero-copy > :nth-child(5) {
     animation-delay: 0.4s;
   }
-  .scene .layer-sun {
-    animation: rise-sun 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-  }
 
+  /* Scrolling away, the far layers fall behind and the sun goes down. */
   @supports (animation-timeline: scroll()) {
-    .scene .layer-sun {
+    .hero .art-sky {
       animation: sink linear both;
       animation-timeline: scroll(root);
       animation-range: 0 100vh;
     }
-    .scene .layer-far {
-      animation: drift-far linear both;
-      animation-timeline: scroll(root);
-      animation-range: 0 100vh;
-    }
-    .scene .layer-palms {
-      animation: drift-near linear both;
+    .hero .art-city {
+      animation: drift linear both;
       animation-timeline: scroll(root);
       animation-range: 0 100vh;
     }
@@ -1509,24 +1607,6 @@ th {
     opacity: 0.45;
   }
 }
-@keyframes twinkle {
-  50% {
-    opacity: 0.2;
-  }
-}
-@keyframes blink {
-  50% {
-    opacity: 0.15;
-  }
-}
-@keyframes ripple {
-  from {
-    transform: scaleX(0.82);
-  }
-  to {
-    transform: scaleX(1.08);
-  }
-}
 @keyframes cue {
   0% {
     transform: translateY(0);
@@ -1540,30 +1620,28 @@ th {
     opacity: 0;
   }
 }
+@keyframes sway {
+  from {
+    rotate: -0.45deg;
+  }
+  to {
+    rotate: 0.55deg;
+  }
+}
 @keyframes rise {
   from {
     opacity: 0;
     transform: translateY(2.5rem);
   }
 }
-@keyframes rise-sun {
-  from {
-    transform: translateY(160px);
-  }
-}
 @keyframes sink {
   to {
-    transform: translateY(140px);
+    transform: translateY(150px);
   }
 }
-@keyframes drift-far {
+@keyframes drift {
   to {
-    transform: translateY(50px);
-  }
-}
-@keyframes drift-near {
-  to {
-    transform: translateY(-70px);
+    transform: translateY(70px);
   }
 }
 @keyframes fade-up {

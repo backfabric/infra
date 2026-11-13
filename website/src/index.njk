@@ -2,13 +2,24 @@
 layout: base.njk
 theme: theme-dark
 bodyClass: home
+preload:
+  - /assets/scene/sky.svg
+  - /assets/scene/city.svg
 ---
+{% from "art.njk" import layer %}
 <section class="hero" aria-labelledby="hero-title">
-  <div class="hero-sky" aria-hidden="true"></div>
-  {{ scene.svg | safe }}
+  <div class="hero-art" aria-hidden="true">
+    {{ layer(scene.sky, "art art-sky") }}
+    {{ layer(scene.city, "art art-city") }}
+    {{ layer(scene.palmC, "palm palm-c") }}
+    {{ layer(scene.palmA, "palm palm-a") }}
+    {{ layer(scene.palmB, "palm palm-b") }}
+    {{ layer(scene.thicket, "thicket thicket-left") }}
+    {{ layer(scene.thicket, "thicket thicket-right") }}
+  </div>
   <div class="hero-copy">
     <p class="kicker"><span class="dot" aria-hidden="true"></span> Open source · NixOS flake · MIT</p>
-    <h1 id="hero-title" class="wordmark">back<span>fabric</span></h1>
+    <h1 id="hero-title" class="wordmark">backfabric</h1>
     <p class="pitch">Bare metal by day. <em>Agents by night.</em></p>
     <p class="lede">An encrypted, hardened k3s cluster on Hetzner bare metal, built to run AI agents and declared end to end in one public NixOS flake.</p>
     <div class="cta">
@@ -193,9 +204,18 @@ bodyClass: home
   </div>
 </section>
 
-<section class="section finale" aria-labelledby="finale-title">
+<section class="finale" aria-labelledby="finale-title">
+  <div class="finale-art" aria-hidden="true">
+    {{ layer(scene.sky, "art", true) }}
+    {{ layer(scene.city, "art", true) }}
+    {{ layer(scene.palmB, "palm palm-b", true) }}
+    {{ layer(scene.palmC, "palm palm-c", true) }}
+    {{ layer(scene.palmA, "palm palm-a", true) }}
+    {{ layer(scene.thicket, "thicket thicket-left", true) }}
+    {{ layer(scene.thicket, "thicket thicket-right", true) }}
+  </div>
   <div class="finale-inner reveal">
-    <h2 id="finale-title">Read the source.<br><span class="hl-pink">Run the night.</span></h2>
+    <h2 id="finale-title">Read the source.<br><span class="hl-sun">Run the night.</span></h2>
     <div class="cta">
       <a class="btn btn-hot" href="{{ site.repo }}">backfabric/infra on GitHub <span aria-hidden="true">↗</span></a>
       <a class="btn btn-ghost" href="/docs/#decisions">{{ repo.adrs.length }} decision records</a>
