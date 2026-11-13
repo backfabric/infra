@@ -1,0 +1,2 @@
+{# A layer of the artwork (src/_data/scene.js) as a decorative image. #}
+{% macro layer(art, class, lazy=false) %}<img class="{{ class }}" src="{{ art.src }}" width="{{ art.width }}" height="{{ art.height }}" alt=""{% if art.foot %} style="--foot: {{ art.foot }}%"{% endif %}{% if lazy %} loading="lazy"{% endif %} decoding="async">{% endmacro %}

@@ -16,6 +16,9 @@
 <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
 <link rel="preload" href="/assets/fonts/anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+{%- for href in preload %}
+<link rel="preload" href="{{ href }}" as="image" type="image/svg+xml">
+{%- endfor %}
 <link rel="stylesheet" href="/assets/site.css">
 </head>
 <body class="{{ bodyClass }}">
