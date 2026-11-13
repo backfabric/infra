@@ -19,7 +19,7 @@ export default {
     {
       title: "Closed hosts",
       text: "Root SSH with keys only, the one open port in nftables; no ping replies, IPv4 only.",
-      links: [pr(6), pr(33), pr(40)],
+      links: [pr(6), pr(33), pr(40), adr("0018", "key-only-ssh-without-hiding")],
     },
     {
       title: "Secrets with sops-nix",
@@ -66,13 +66,13 @@ export default {
       text: "Namespaces that skip Pod Security may run digest-pinned images only.",
       links: [pr(66), adr("0024", "pod-security-exemptions-for-pinned-images")],
     },
-  ],
-  inProgress: [
     {
       title: "Agent Substrate runtime",
-      text: "Agents as actors in gVisor sandboxes, suspended between tasks and resumed, egress through a gateway.",
-      links: [pr(48), issue(47)],
+      text: "Agents as actors in gVisor sandboxes on warm worker pods, suspended to snapshots between tasks and resumed on the next request.",
+      links: [pr(48), adr("0023", "agent-substrate-runtime")],
     },
+  ],
+  inProgress: [
     {
       title: "API key at the egress gateway",
       text: "The gateway injects the OpenAI key; the agent never holds it and continues its session.",

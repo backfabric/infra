@@ -91,10 +91,13 @@ function frontMatter(text) {
   return { data: yaml.load(match[1]) ?? {}, body: text.slice(match[0].length) };
 }
 
+// The text of a line or paragraph of Markdown, without its markup.
 function plain(markdown) {
-  return markdown
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[`*_]/g, "")
+  return md
+    .parseInline(markdown, {})
+    .flatMap((token) => token.children ?? [])
+    .map((t) => (t.type === "text" || t.type === "code_inline" ? t.content : t.type.endsWith("break") ? " " : ""))
+    .join("")
     .replace(/\s+/g, " ")
     .trim();
 }

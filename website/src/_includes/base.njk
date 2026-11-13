@@ -3,16 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% if title %}{{ title }} · {% endif %}{{ site.name }}</title>
+<title>{% if title %}{{ title }} · {{ site.name }}{% else %}{{ site.name }} · {{ site.tagline }}{% endif %}</title>
 <meta name="description" content="{{ description or site.description }}">
 <meta name="color-scheme" content="{{ 'dark' if theme == 'theme-dark' else 'dark light' }}">
-<meta name="theme-color" content="#12081f">
+{%- if theme == 'theme-dark' %}
+<meta name="theme-color" content="#110a3a">
+{%- else %}
+<meta name="theme-color" content="#fbf6f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#100926" media="(prefers-color-scheme: dark)">
+{%- endif %}
 <meta name="referrer" content="no-referrer">
 <link rel="canonical" href="{{ site.url }}{{ page.url }}">
-<meta property="og:title" content="{{ title or site.name }}">
+<meta property="og:site_name" content="{{ site.name }}">
+<meta property="og:title" content="{{ title or (site.name + ' · ' + site.tagline) }}">
 <meta property="og:description" content="{{ description or site.description }}">
 <meta property="og:url" content="{{ site.url }}{{ page.url }}">
 <meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
 <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
 <link rel="preload" href="/assets/fonts/anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
