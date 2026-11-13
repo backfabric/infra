@@ -1,8 +1,9 @@
 # The container image of an agent, ghcr.io/backfabric/agent: Codex and a
 # small HTTP supervisor (./supervisor.py), run as an Agent Substrate actor.
 # Built and published by .github/workflows/agent-image.yml; see
-# docs/agent-image.md. Contains no secrets: each actor logs in to Codex at
-# run time.
+# docs/agent-image.md. Contains no secrets: an actor uses an OpenAI API key
+# that Agent Substrate's egress gateway injects, or logs in to Codex at run
+# time.
 {
   lib,
   dockerTools,
