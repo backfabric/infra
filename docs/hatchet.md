@@ -48,10 +48,18 @@ kubectl -n hatchet logs deployment/hatchet-engine
 kubectl -n hatchet logs deployment/hatchet-api -c migrate   # also -c seed, -c api
 ```
 
-Healthy: the three Deployments `READY 1/1`; Secrets `hatchet-admin`,
-`hatchet-keys`, `postgres-hatchet` and one `hatchet-token-<namespace>` per
-client namespace. The engine logs `instance timezone verified` and then
-its controllers starting.
+Healthy: the three Deployments `READY 1/1`; Secrets
+`hatchet-admin`, `hatchet-keys`, `postgres-hatchet` and one
+`hatchet-token-<namespace>` per client namespace; none of Hatchet's
+startup errors about the database or its timezone (Hatchet logs its
+database at level warn, so a healthy start says nothing about it):
+
+```sh
+for d in engine api; do
+  kubectl -n hatchet logs deployment/hatchet-$d --all-containers |
+    grep -E 'timezone is set|could not (connect to|create temporary connection to|query)|failed to open DB'
+done   # nothing
+```
 
 ## The dashboard
 
@@ -142,7 +150,16 @@ systemctl start hatchet-credentials
 
 The client's Secret gets the new token; restart the client. The old
 token stays valid until it is revoked in the dashboard (Settings, API
-Tokens).
+Tokens); `hatchet-admin` has no command for it.
+
+### Remove a client namespace
+
+Remove it from `clientNamespaces` and deploy: NetworkPolicy no longer
+admits it, and `hatchet-credentials` deletes the Secrets it labelled
+`backfabric.io/hatchet-client=<namespace>`: `hatchet/hatchet-token-<namespace>`
+and `<namespace>/hatchet-client-token`. The token itself stays valid
+(100 years); revoke it in the dashboard (Settings, API Tokens; it is
+named `default`, created at the time in the unit's journal).
 
 ## The units
 
@@ -160,7 +177,8 @@ it. In order, each step only if its Secret is missing:
    `hatchet-admin k8s create-worker-token`, which writes a token (valid for
    100 years) into `hatchet-token-<namespace>`.
 
-Then it copies every token into its namespace (created if missing). The
+Then it copies every token into its namespace (created if missing), and
+deletes the labelled token Secrets of namespaces no longer listed. The
 Jobs run as the service account `hatchet-setup`, which may only create
 Secrets in `hatchet` and read or update the ones it writes; they are
 deleted after they complete, their logs go to the unit's journal. After

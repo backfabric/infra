@@ -8,11 +8,11 @@
 #     passes Pod Security `restricted` (non-root, no capabilities,
 #     RuntimeDefault seccomp, read-only root file system);
 #   - the database `hatchet` from `backfabric.postgres.databases`;
-#     DATABASE_URL from its Secret, TLS verify-full against its CA. Every
-#     pod runs `hatchet-migrate` first (goose, under a session lock, so
-#     both may run at once); a refused first connection (kube-router admits
-#     a new pod's address with a delay) fails the init container, which the
-#     kubelet restarts;
+#     DATABASE_URL from its Secret, TLS verify-full against its CA. The
+#     engine and the API run `hatchet-migrate` first (goose, under a
+#     session lock, so both may run at once); it retries its first
+#     connection for 30 seconds (kube-router admits a new pod's address
+#     with a delay);
 #   - the message queue in PostgreSQL (`SERVER_MSGQUEUE_KIND=postgres`), no
 #     RabbitMQ; gRPC without TLS inside the cluster;
 #   - NetworkPolicy: all ingress and egress of the namespace denied except
@@ -24,8 +24,9 @@
 #     host) generates the dashboard admin's password, runs the setup Jobs
 #     that generate the encryption keys (`hatchet-admin k8s quickstart`) and
 #     one client token per client namespace (`hatchet-admin k8s
-#     create-worker-token`), each once, and copies each token into the
-#     Secret `hatchet-client-token` of its namespace.
+#     create-worker-token`), each once, copies each token into the Secret
+#     `hatchet-client-token` of its namespace, and deletes the token Secrets
+#     of namespaces no longer listed.
 {
   config,
   lib,
@@ -55,6 +56,9 @@ let
   # The token Secret in the namespace `hatchet`, per client namespace.
   tokenSecret = ns: "hatchet-token-${ns}";
   kubeconfig = "/etc/rancher/k3s/k3s.yaml";
+  # Marks the token Secrets hatchet-credentials manages, with the client
+  # namespace as the value.
+  clientLabel = "backfabric.io/hatchet-client";
 
   # Configuration shared by every Hatchet process; the secrets come from
   # the Secrets `hatchet-keys` and `postgres-hatchet`.
@@ -433,6 +437,10 @@ let
         fi
       '';
 
+  # The k3s manifests this module deploys, by name: deployed while it is
+  # enabled, and removed (backfabric.k3s.removedManifests) while it is not.
+  k3sManifests.hatchet.source = manifest;
+
   # The setup Job hatchet-credentials creates: `hatchet-admin` with the
   # Job's arguments. `hatchet-keys` is optional: the first Job writes it.
   setupJob = podSpec "hatchet-setup" {
@@ -515,7 +523,9 @@ let
 
       # One token per client namespace, minted once (for the default
       # tenant, which the API's init container seeds), and copied to the
-      # client's Secret `hatchet-client-token` at every run.
+      # client's Secret `hatchet-client-token` at every run. Both Secrets
+      # carry the label ${clientLabel}=<namespace>, by which the Secrets of
+      # namespaces no longer listed are found and deleted below.
       clients=(${lib.escapeShellArgs cfg.clientNamespaces})
       for client in "''${clients[@]}"; do
         if ! exists -n ${namespace} secret "hatchet-token-$client"; then
@@ -523,11 +533,12 @@ let
             kubectl -n ${namespace} rollout status deployment/hatchet-api --timeout=10s
           run_job "token-$client" k8s create-worker-token --namespace ${namespace} --resource-name "hatchet-token-$client"
         fi
+        kubectl -n ${namespace} label --overwrite secret "hatchet-token-$client" "${clientLabel}=$client" >/dev/null
         exists namespace "$client" || kubectl create namespace "$client"
         kubectl -n ${namespace} get secret "hatchet-token-$client" -o json |
           CLIENT=$client jq '{
             apiVersion: "v1", kind: "Secret",
-            metadata: {name: "hatchet-client-token", namespace: env.CLIENT},
+            metadata: {name: "hatchet-client-token", namespace: env.CLIENT, labels: {"${clientLabel}": env.CLIENT}},
             data: {
               HATCHET_CLIENT_TOKEN: .data.HATCHET_CLIENT_TOKEN,
               HATCHET_CLIENT_HOST_PORT: ("${engineAddress}" | @base64),
@@ -535,6 +546,17 @@ let
             }
           }' | kubectl apply --server-side --field-manager=hatchet-credentials -f -
       done
+
+      # The Secrets of namespaces removed from clientNamespaces. The token
+      # itself stays valid until it is revoked in the dashboard.
+      listed=" ''${clients[*]} "
+      kubectl get secret --all-namespaces -l ${clientLabel} -o json |
+        jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name) \(.metadata.labels."${clientLabel}")"' |
+        while read -r ns name client; do
+          [[ $listed == *" $client "* ]] && continue
+          echo "Deleting the Secret $ns/$name of $client, no longer in clientNamespaces; revoke its token in the dashboard."
+          kubectl -n "$ns" delete secret "$name"
+        done
     '';
   };
 in
@@ -562,7 +584,7 @@ in
   # Disabled: k3s removes what the manifest applied, with the namespace and
   # its Secrets (docs/hatchet.md, "Turning it off").
   config = lib.mkMerge [
-    { backfabric.k3s.removedManifests = lib.mkIf (!cfg.enable) [ "hatchet" ]; }
+    { backfabric.k3s.removedManifests = lib.mkIf (!cfg.enable) (lib.attrNames k3sManifests); }
     (lib.mkIf cfg.enable {
       assertions = [
         {
@@ -583,7 +605,7 @@ in
         }
       ];
 
-      services.k3s.manifests.hatchet.source = manifest;
+      services.k3s.manifests = k3sManifests;
 
       # As postgres-credentials: waits for a bounded time and fails, at
       # every deployment and at boot.
