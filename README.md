@@ -42,11 +42,16 @@ requires them there for the flake to be `github:backfabric/infra`.
 - `nix/templates/default/`: the skeleton of the private repository, see below;
   evaluated by `checks.x86_64-linux.template-empty` and
   `checks.x86_64-linux.template-with-host`.
-- `nix/images/`: the agents' container image `ghcr.io/backfabric/agent`
-  (Codex behind the A2A supervisor, run as an Agent Substrate actor),
-  `packages.x86_64-linux.agent-image`, built and published by CI, see
-  [docs/agent-image.md](docs/agent-image.md).
-- `agent/`: the image's supervisor, which serves A2A 1.0 and runs Codex.
+- `nix/images/`: the container images CI builds and publishes: the agents'
+  `ghcr.io/backfabric/agent` (Codex behind the A2A supervisor, run as an
+  Agent Substrate actor), `packages.x86_64-linux.agent-image`, see
+  [docs/agent-image.md](docs/agent-image.md); and the dispatcher's
+  `ghcr.io/backfabric/dispatcher`, `packages.x86_64-linux.dispatcher-image`.
+- `agent/`: the agent image's supervisor, which serves A2A 1.0 and runs Codex.
+- `dispatcher/`: the dispatcher, the A2A front door for agent tasks
+  ([ADR 0028](docs/adr/0028-dispatcher.md)), a Go service built as
+  `packages.<system>.dispatcher` (`nix/packages/dispatcher.nix`), see
+  [dispatcher/README.md](dispatcher/README.md).
 - `website/`: the project website at <https://backfabric.dev> (Eleventy),
   generated from this README, the template's README, and `docs/`;
   `packages.<system>.website` (`nix/website.nix`), published to GitHub
@@ -201,7 +206,8 @@ nix flake init -t github:backfabric/infra
 ## Checks
 
 CI evaluates; the only things it builds are the agent image
-([ADR 0022](docs/adr/0022-ci-builds-the-agent-image.md)) and the website
+([ADR 0022](docs/adr/0022-ci-builds-the-agent-image.md)), the dispatcher
+and its image ([ADR 0028](docs/adr/0028-dispatcher.md)) and the website
 ([ADR 0026](docs/adr/0026-project-website-in-the-repository.md)). Run the
 same checks locally with:
 

@@ -1,0 +1,136 @@
+# Builds the dispatcher and its image (dispatcher/README.md): on pull
+# requests to prove they build, pass their tests and start, on main to
+# publish the image to ghcr.io/backfabric/dispatcher (ADR 0028, amending
+# ADR 0022).
+name: dispatcher-image
+
+on:
+  pull_request:
+    paths:
+      - dispatcher/**
+      - nix/images/dispatcher.nix
+      - nix/packages/dispatcher.nix
+      - flake.nix
+      - flake.lock
+      - .github/workflows/dispatcher-image.yml
+  push:
+    branches: [main]
+    paths:
+      - dispatcher/**
+      - nix/images/dispatcher.nix
+      - nix/packages/dispatcher.nix
+      - flake.nix
+      - flake.lock
+      - .github/workflows/dispatcher-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/backfabric/dispatcher
+  # Upstream's PostgreSQL image, the platform's major version (ADR 0025),
+  # pinned as nix/packages/substrate.nix pins it.
+  POSTGRES_IMAGE: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      # The package's check phase runs go vet and the tests, with a
+      # PostgreSQL of its own.
+      - name: Build image
+        run: |
+          nix build -L .#packages.x86_64-linux.dispatcher-image
+          du --apparent-size --block-size=1M --dereference result
+      # The image starts as a non-root user on a read-only root file system,
+      # migrates the database, serves the agent card, and refuses a call
+      # without a token. Nothing here issues tokens: the tests cover them.
+      - name: Run image
+        run: |
+          image=$(docker load <result | sed -n 's/^Loaded image: //p')
+          docker image inspect --format '{{json .Config}}' "$image"
+          docker network create dispatcher
+          docker run --detach --name postgres --network dispatcher \
+            --env POSTGRES_PASSWORD=test --env POSTGRES_DB=dispatcher "$POSTGRES_IMAGE"
+          cat >config.json <<'EOF'
+          {
+            "listen": ":8080",
+            "url": "http://localhost:8080",
+            "issuers": {
+              "kubernetes": {
+                "issuer": "https://kubernetes.default.svc.cluster.local",
+                "audience": "dispatcher",
+                "jwksURL": "https://kubernetes.default.svc/openid/v1/jwks"
+              }
+            },
+            "agents": {
+              "codex": {
+                "description": "Codex",
+                "version": "test",
+                "callers": [{"issuer": "kubernetes", "subject": "system:serviceaccount:operator:operator"}]
+              }
+            }
+          }
+          EOF
+          docker run --detach --name dispatcher --network dispatcher --read-only --publish 8080:8080 \
+            --volume "$PWD/config.json:/etc/dispatcher/config.json:ro" \
+            --env PGHOST=postgres --env PGUSER=postgres --env PGPASSWORD=test \
+            --env PGDATABASE=dispatcher --env PGSSLMODE=disable "$image"
+          trap 'docker logs dispatcher' EXIT
+          # Until the dispatcher has the database and listens.
+          curl --silent --show-error --fail --retry 30 --retry-all-errors --retry-delay 1 localhost:8080/healthz
+          docker exec postgres psql -U postgres -d dispatcher -c '\dt'
+          curl --silent --show-error --fail localhost:8080/agents/codex/.well-known/agent-card.json | tee card.json
+          jq --exit-status '.name == "codex" and .supportedInterfaces[0].url == "http://localhost:8080/agents/codex/" and .supportedInterfaces[0].protocolVersion == "1.0" and .securitySchemes.bearer.httpAuthSecurityScheme.scheme == "Bearer"' card.json
+          curl --silent --show-error localhost:8080/agents/codex/ \
+            --header 'Content-Type: application/json' --header 'A2A-Version: 1.0' \
+            --data '{"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {"message": {"role": "ROLE_USER", "messageId": "m1", "parts": [{"text": "Say hello"}]}}}' |
+            tee send.json
+          jq --exit-status '.error.code == -31401' send.json
+          test "$(docker inspect --format '{{.Config.User}}' dispatcher)" = 65532:65532
+
+  publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - name: Build image
+        run: nix build -L .#packages.x86_64-linux.dispatcher-image
+      # docker's credential store (~/.docker/config.json) is read by skopeo
+      # and by the attestation step.
+      - name: Log in to ghcr.io
+        run: docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Tagged with the commit only: consumers pin the digest.
+      - name: Push image
+        id: push
+        run: |
+          nix run --inputs-from . nixpkgs#skopeo -- copy --digestfile digest \
+            docker-archive:result "docker://$IMAGE:$GITHUB_SHA"
+          digest=$(cat digest)
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+          {
+            echo "### Dispatcher image"
+            echo
+            echo "\`$IMAGE@$digest\`"
+            echo
+            echo "Tag: \`$GITHUB_SHA\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          # Linked artifacts storage records would need artifact-metadata: write.
+          create-storage-record: false
