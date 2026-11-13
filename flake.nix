@@ -142,22 +142,25 @@
       lib.mkFleetShell = import ./nix/fleet/shell.nix;
 
       # The operator command `backfabric` on its own, for a host whose public
-      # keys do not exist yet (see docs/fleet-shell.md); and the agents'
-      # container image, built and published by CI only
-      # (docs/agent-image.md); and the project website, published by CI to
-      # GitHub Pages (ADR 0026).
+      # keys do not exist yet (see docs/fleet-shell.md); the agents' and the
+      # dispatcher's container images, built and published by CI only
+      # (docs/agent-image.md, dispatcher/README.md), and the dispatcher
+      # itself, which builds and runs its tests on every system; and the
+      # project website, published by CI to GitHub Pages (ADR 0026).
       packages = forAllSystems (
         pkgs:
         let
           backfabric = pkgs.callPackage ./nix/fleet/cli { };
+          dispatcher = pkgs.callPackage ./nix/packages/dispatcher.nix { };
         in
         {
-          inherit backfabric;
+          inherit backfabric dispatcher;
           default = backfabric;
           website = pkgs.callPackage ./nix/website.nix { };
         }
         // lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
           agent-image = pkgs.callPackage ./nix/images/agent.nix { };
+          dispatcher-image = pkgs.callPackage ./nix/images/dispatcher.nix { inherit dispatcher; };
         }
       );
 
