@@ -2,159 +2,211 @@
 layout: base.njk
 theme: theme-dark
 bodyClass: home
-preload:
-  - /assets/scene/sky.svg
-  - /assets/scene/city.svg
+statement: An agent runs code it wrote a minute ago and reads whatever the web hands it. backfabric assumes it will misbehave one day, and limits what it can reach and what it can hide.
 ---
-{% from "art.njk" import layer %}
 <section class="hero" aria-labelledby="hero-title">
-  <div class="hero-art" aria-hidden="true">
-    {{ layer(scene.sky, "art art-sky") }}
-    {{ layer(scene.city, "art art-city") }}
-    {{ layer(scene.palmC, "palm palm-c") }}
-    {{ layer(scene.palmA, "palm palm-a") }}
-    {{ layer(scene.palmB, "palm palm-b") }}
-    {{ layer(scene.thicket, "thicket thicket-left") }}
-    {{ layer(scene.thicket, "thicket thicket-right") }}
-  </div>
-  <div class="hero-copy">
-    <p class="kicker"><span class="dot" aria-hidden="true"></span> Open source · NixOS flake · MIT</p>
+  <canvas class="cloth" data-cloth data-seed="0" data-room="1" data-sets="1" data-horizon-below="#hero-title" aria-hidden="true"></canvas>
+  <div class="hero-inner">
+    <p class="kicker"><i aria-hidden="true"></i> Open source · NixOS · MIT</p>
     <h1 id="hero-title" class="wordmark">backfabric</h1>
-    <p class="pitch">Bare metal by day. <em>Agents by night.</em></p>
-    <p class="lede">An encrypted, hardened k3s cluster on Hetzner bare metal, built to run AI agents and declared end to end in one public NixOS flake.</p>
-    <div class="cta">
-      <a class="btn btn-hot" href="#start">Get started</a>
-      <a class="btn btn-ghost" href="/docs/">Read the docs</a>
-      <a class="btn btn-ghost" href="{{ site.repo }}">GitHub <span aria-hidden="true">↗</span></a>
+    <div class="hero-copy">
+      <p class="pitch">Run AI agents on servers you own.</p>
+      <p class="lede">backfabric turns Hetzner bare metal into an encrypted, locked-down Kubernetes cluster: agents run in sandboxes, nothing in it can be reached from the internet, and every request to its API is logged. All of it is NixOS code you can read.</p>
+      <div class="cta">
+        <a class="btn btn-sun" href="#start">Get started</a>
+        <a class="btn btn-glass" href="/docs/">Read the docs</a>
+      </div>
     </div>
   </div>
-  <a class="scroll-cue" href="#what" aria-label="Scroll to what backfabric is"><span aria-hidden="true"></span></a>
+  <p class="facts">
+    <span><b>{{ status.shipped.length }}</b>shipped</span>
+    <span><b>{{ status.inProgress.length }}</b>in review</span>
+    <span><b>{{ status.planned.length }}</b>planned</span>
+    <span><b>{{ repo.adrs.length }}</b>decision records</span>
+  </p>
 </section>
 
-<div class="marquee" aria-hidden="true">
-  <div class="marquee-track">
-    {% for i in [1, 2] %}<span>LUKS</span><b>✦</b><span>btrfs raid1</span><b>✦</b><span>initrd unlock</span><b>✦</b><span>k3s · embedded etcd</span><b>✦</b><span>CIS hardened</span><b>✦</b><span>sops-nix</span><b>✦</b><span>OpenBao</span><b>✦</b><span>OpenTelemetry</span><b>✦</b><span>gVisor</span><b>✦</b>{% endfor %}
+<div class="sheet">
+<section id="why" class="section aura" aria-labelledby="why-title">
+  <div class="section-head">
+    <p class="eyebrow"><b>01</b> Why</p>
+    <h2 id="why-title" class="display reveal">Agents are software<br>you <span class="sun">can't fully trust</span>.</h2>
+    <p class="manifesto" data-read>{% for word in statement.split(" ") %}<span style="--i: {{ loop.index0 }}">{{ word }}</span> {% endfor %}</p>
   </div>
-</div>
+  <div class="bento">
+    <article class="card wide reveal" data-glow style="--tint: var(--amber); --glow: rgb(255 194 102 / 0.16)">
+      <div class="viz nest" aria-hidden="true">host<div>cluster<div>gVisor sandbox<div class="agent">agent</div></div></div></div>
+      <p class="card-tag">Sandbox</p>
+      <h3>One sandbox per agent</h3>
+      <p>Each agent runs in its own gVisor sandbox, not directly on the server's kernel. Between tasks it is frozen to a snapshot; the next request resumes it with its memory and files.</p>
+    </article>
+    <article class="card narrow reveal" data-glow style="--tint: var(--teal); --glow: rgb(47 243 224 / 0.14)">
+      <div class="viz" aria-hidden="true">
+        <div class="ports">{% for n in range(0, 48) %}<i{% if n == 29 %} class="open"{% endif %}></i>{% endfor %}</div>
+        <p class="viz-note"><span>inbound ports</span><b>1 open: ssh, keys only</b></p>
+      </div>
+      <p class="card-tag">Network</p>
+      <h3>Nothing answers from outside</h3>
+      <p>From the internet a host answers on one port: SSH, with keys only. Nothing in the cluster, its API included, can be reached from outside the host.</p>
+    </article>
+    <article class="card narrow reveal" data-glow style="--tint: var(--pink); --glow: rgb(255 46 136 / 0.16)">
+      <div class="viz disks" aria-hidden="true">
+        <div><span>disk 1</span><b>LUKS · locked</b></div>
+        <div><span>disk 2 · mirror</span><b>LUKS · locked</b></div>
+        <div class="key"><span>passphrase over ssh</span><b>••••••••</b></div>
+      </div>
+      <p class="card-tag">Disks</p>
+      <h3>Encrypted, unlocked by you</h3>
+      <p>The disks are encrypted. After every reboot the server waits until you send the passphrase over SSH. It is kept in your password manager, not on the server and not in git.</p>
+    </article>
+    <article class="card wide reveal" data-glow style="--tint: var(--violet); --glow: rgb(138 92 255 / 0.2)">
+      <div class="viz log" aria-hidden="true">
+        <ol>
+          {%- for i in [1, 2] %}
+          <li><span class="t">09:14:02</span><span class="who">api</span><span>get pods · sa/agent-7</span><span class="ok">allow</span></li>
+          <li><span class="t">09:14:02</span><span class="who">openbao</span><span>read secret/agents/7</span><span class="ok">allow</span></li>
+          <li><span class="t">09:14:03</span><span class="who">api</span><span>create service · NodePort</span><span class="no">deny</span></li>
+          <li><span class="t">09:14:05</span><span class="who">otel</span><span>span task.run · ns/agents</span><span class="ok">verified</span></li>
+          <li><span class="t">09:14:09</span><span class="who">api</span><span>create pod · image unpinned</span><span class="no">deny</span></li>
+          <li><span class="t">09:14:11</span><span class="who">openbao</span><span>read secret/platform</span><span class="no">deny</span></li>
+          <li><span class="t">09:14:12</span><span class="who">api</span><span>list secrets · sa/agent-7</span><span class="no">deny</span></li>
+          <li><span class="t">09:14:15</span><span class="who">otel</span><span>log agent.stdout · ns/agents</span><span class="ok">verified</span></li>
+          {%- endfor %}
+        </ol>
+      </div>
+      <p class="card-tag">Audit</p>
+      <h3>A record agents can't rewrite</h3>
+      <p>Every request to the Kubernetes API and to the secret store is logged. What pods report goes to a collector on the host, outside the cluster, which notes who really sent it.</p>
+    </article>
+  </div>
+</section>
 
-<section id="what" class="section what" aria-labelledby="what-title">
+<section id="what" class="section aura" style="--aura: rgb(47 243 224 / 0.1); --aura-x: -10%" aria-labelledby="what-title">
   <div class="section-head reveal">
-    <p class="eyebrow">01 · What it is</p>
-    <h2 id="what-title">A cluster you can <span class="hl-pink">read</span>,<br>rebuild and <span class="hl-teal">trust</span>.</h2>
-    <p class="intro">backfabric is a public flake of NixOS modules, the operator tooling that installs and runs them, and the skeleton of the private repository that consumes both. Your hosts, addresses and secrets never leave that private repository.</p>
+    <p class="eyebrow"><b>02</b> What it is</p>
+    <h2 id="what-title" class="display">Not a service.<br><span class="sea">Code you can read.</span></h2>
+    <p class="intro">backfabric is the code that sets up servers you rent. It comes in three parts.</p>
   </div>
-  <div class="cards">
-    <article class="card reveal">
+  <div class="bento">
+    <article class="card third reveal" data-glow>
+      <pre class="snippet" aria-hidden="true"><span class="c"># hosts/node1/default.nix</span>
+<span class="k">backfabric.disks</span>.devices = [
+  <span class="s">"/dev/disk/by-id/nvme-..."</span>
+  <span class="s">"/dev/disk/by-id/nvme-..."</span>
+];
+<span class="k">backfabric.network</span>.ipv4 = {
+  address = <span class="s">"203.0.113.10"</span>;
+  gateway = <span class="s">"203.0.113.1"</span>;
+};
+<span class="k">backfabric.access</span>.ssh.port = <span class="p">2222</span>;</pre>
       <p class="card-tag">nixosModules</p>
       <h3>The modules</h3>
-      <p>One NixOS module per subsystem, <code>disks</code>, <code>network</code>, <code>access</code>, <code>secrets</code>, <code>k3s</code>, <code>openbao</code>, <code>otel</code>, with options under <code>backfabric.&lt;subsystem&gt;</code>.</p>
-      <a href="/docs/overview/">Subsystems <span aria-hidden="true">→</span></a>
+      <p>NixOS modules that configure a server from the disks up. You enable them and set a handful of options. Nine so far: <code>disks</code>, <code>network</code>, <code>access</code>, <code>secrets</code>, <code>k3s</code>, <code>openbao</code>, <code>otel</code>, <code>substrate</code>, <code>postgres</code>.</p>
+      <a class="more" href="/docs/overview/">What each one does <span aria-hidden="true">→</span></a>
     </article>
-    <article class="card reveal">
+    <article class="card third reveal" data-glow style="--glow: rgb(255 194 102 / 0.16)">
+      <ol class="flow" aria-hidden="true"><li>sops init</li><li>keygen</li><li>sops add-host</li><li>probe</li><li>install</li><li>unlock</li><li>finalize</li><li>deploy</li></ol>
       <p class="card-tag">backfabric</p>
       <h3>The command</h3>
-      <p>One operator CLI in a fleet dev shell: <code>keygen</code>, <code>probe</code>, <code>install</code>, <code>unlock</code>, <code>finalize</code>, <code>deploy</code>. Each step does one thing, can be re-run, and prints the next.</p>
-      <a href="/docs/fleet-shell/">The fleet shell <span aria-hidden="true">→</span></a>
+      <p><code>backfabric</code> takes a freshly rented server to a running host and keeps it up to date: it generates keys, inspects the hardware, installs, unlocks the disks after a reboot and deploys your changes. Each step can be run again after a failure and prints the next one.</p>
+      <a class="more" href="/docs/fleet-shell/">Installing a host <span aria-hidden="true">→</span></a>
     </article>
-    <article class="card reveal">
+    <article class="card third reveal" data-glow style="--glow: rgb(47 243 224 / 0.14)">
+      <pre class="snippet" aria-hidden="true"><span class="k">fleet/</span>                <span class="c"># private</span>
+├─ flake.nix
+├─ .sops.yaml
+├─ <span class="k">hosts/</span>node1/
+│  ├─ default.nix
+│  ├─ facter.json
+│  └─ <span class="s">*.pub</span>
+└─ <span class="k">secrets/</span>
+   └─ common.yaml      <span class="c"># encrypted</span></pre>
       <p class="card-tag">templates.default</p>
-      <h3>Your private fleet</h3>
-      <p>A template for the private repository: hosts, facter reports, sops-encrypted secrets. It owns nixpkgs; this flake stays consumer-agnostic.</p>
-      <a href="/docs/template/">The template <span aria-hidden="true">→</span></a>
+      <h3>Your private repository</h3>
+      <p>The addresses, disk ids and encrypted secrets of your servers live in a private repository that you create from a template. The public code never contains them, and you decide when to update NixOS.</p>
+      <a class="more" href="/docs/template/">The template <span aria-hidden="true">→</span></a>
     </article>
   </div>
 </section>
 
-<section id="stack" class="section stack" aria-labelledby="stack-title">
+<section id="stack" class="section aura" style="--aura: rgb(138 92 255 / 0.2); --aura-x: 0%; --aura-y: 30%" aria-labelledby="stack-title">
   <div class="section-head reveal">
-    <p class="eyebrow">02 · The stack</p>
-    <h2 id="stack-title">Five layers.<br><span class="outline">One flake.</span></h2>
-    <p class="intro">From the disks up to the tasks agents pick up. The lower layers are on main, each with its decision records; the upper ones are being built in the open.</p>
+    <p class="eyebrow"><b>03</b> The stack</p>
+    <h2 id="stack-title" class="display">Five layers.<br><span class="sun">One flake.</span></h2>
+    <p class="intro">Each layer rests on the one below. The first four are on main, each with the records of its decisions; the task layer is in review.</p>
   </div>
   <div class="stack-grid">
-    <div class="tower" aria-hidden="true">
-      <div class="slab s5"><span>Tasks</span></div>
-      <div class="slab s4"><span>Agents</span></div>
-      <div class="slab s3"><span>Secrets · Telemetry</span></div>
-      <div class="slab s2"><span>Cluster</span></div>
-      <div class="slab s1"><span>Host</span></div>
+    <div class="tower" data-tower data-active="1" aria-hidden="true">
+      <div class="plate dashed" style="--i: 4; --c: var(--coral)">Tasks</div>
+      <div class="plate" style="--i: 3; --c: var(--pink)">Agents</div>
+      <div class="plate" style="--i: 2; --c: var(--amber)">Secrets · Telemetry</div>
+      <div class="plate" style="--i: 1; --c: var(--violet)">Cluster</div>
+      <div class="plate" style="--i: 0; --c: var(--teal)">Host</div>
     </div>
     <ol class="layers">
-      <li class="layer-row reveal" style="--c: var(--teal)">
-        <p class="layer-no">01</p>
+      <li class="layer is-active" data-layer-text="1" style="--c: var(--teal)">
+        <p class="layer-no" aria-hidden="true">01</p>
         <div>
           <h3>Host <span class="badge badge-ok">shipped</span></h3>
-          <p>NixOS on Hetzner bare metal. LUKS on every disk with btrfs raid1 across them and GRUB mirrored to each; the disks are unlocked over SSH in the initrd after every boot. Root SSH with keys only, a closed nftables firewall, IPv4 only.</p>
-          <p class="chips"><span>LUKS</span><span>btrfs raid1</span><span>initrd SSH</span><span>nixos-facter</span><span>nftables</span></p>
+          <p>A rented Hetzner server becomes a NixOS host that can be rebuilt from code. Its disks are encrypted, and mirrored when there are two or more. After every boot it waits for your passphrase, sent over SSH. The only way in from outside is SSH with your key.</p>
+          <p class="chips"><span>LUKS</span><span>btrfs raid1</span><span>unlock over SSH</span><span>nftables</span><span>IPv4 only</span></p>
         </div>
       </li>
-      <li class="layer-row reveal" style="--c: var(--violet-hi)">
-        <p class="layer-no">02</p>
+      <li class="layer" data-layer-text="2" style="--c: var(--violet)">
+        <p class="layer-no" aria-hidden="true">02</p>
         <div>
           <h3>Cluster <span class="badge badge-ok">shipped</span></h3>
-          <p>k3s on embedded etcd from the first node, hardened per the K3s CIS guide: Pod Security <code>restricted</code>, every API request audited, Secrets encrypted with secretbox, nothing reachable from outside, no NodePort or LoadBalancer. Exempt namespaces run digest-pinned images only.</p>
-          <p class="chips"><span>k3s 1.36</span><span>embedded etcd</span><span>CIS</span><span>flannel</span><span>NetworkPolicy</span></p>
+          <p>Kubernetes, as k3s, configured the way the K3s CIS hardening guide asks. Pods run under the strictest Pod Security level; the few namespaces that cannot are limited to images pinned by digest. Every API request is logged, Secrets are encrypted in the database, and a Service cannot be exposed outside the host. One server for now: joining more is not built yet.</p>
+          <p class="chips"><span>k3s 1.36</span><span>embedded etcd</span><span>CIS guide</span><span>flannel</span><span>NetworkPolicy</span></p>
         </div>
       </li>
-      <li class="layer-row reveal" style="--c: var(--orange)">
-        <p class="layer-no">03</p>
+      <li class="layer" data-layer-text="3" style="--c: var(--amber)">
+        <p class="layer-no" aria-hidden="true">03</p>
         <div>
           <h3>Secrets &amp; telemetry <span class="badge badge-ok">shipped</span></h3>
-          <p>sops-nix decrypts with each host's SSH key. OpenBao runs on the host, out of the cluster's reach, with Kubernetes auth and a full audit log. An OpenTelemetry Collector on the host stamps every sender's verified identity and writes the append-only audit archive of record.</p>
-          <p class="chips"><span>sops-nix</span><span>OpenBao</span><span>OTel Collector</span><span>TLS only</span></p>
+          <p>Two services run on the host, beside the cluster rather than inside it, so they work even when the cluster does not. OpenBao keeps the secrets that workloads need and logs every access. An OpenTelemetry Collector takes what pods report, checks who sent it, and appends it to an archive on the host. The host's own secrets sit encrypted in your repository, and the host decrypts them with its SSH key.</p>
+          <p class="chips"><span>OpenBao</span><span>OTel Collector</span><span>sops-nix</span><span>TLS only</span></p>
         </div>
       </li>
-      <li class="layer-row reveal" style="--c: var(--pink)">
-        <p class="layer-no">04</p>
+      <li class="layer" data-layer-text="4" style="--c: var(--pink)">
+        <p class="layer-no" aria-hidden="true">04</p>
         <div>
-          <h3>Agent runtime <span class="badge badge-wip">in progress</span></h3>
-          <p>The agent image, Codex with a small supervisor built by Nix, is published to <code>ghcr.io/backfabric/agent</code> with build provenance. In review: Agent Substrate, which runs each agent as an actor in a gVisor sandbox, suspends it between tasks and routes its egress through a gateway that holds the API key.</p>
-          <p class="chips"><span>Nix-built image</span><span>SLSA provenance</span><span>Agent Substrate</span><span>gVisor</span></p>
+          <h3>Agent runtime <span class="badge badge-ok">shipped</span></h3>
+          <p>Agent Substrate runs each agent as a long-lived actor in a gVisor sandbox: frozen to a snapshot between tasks, resumed on the next request. The agent itself is a container image built by Nix, Codex plus a small supervisor, published with build provenance. The runtime is off until you enable it.</p>
+          <p class="chips"><span>Agent Substrate</span><span>gVisor</span><span>Nix-built image</span><span>SLSA provenance</span></p>
         </div>
       </li>
-      <li class="layer-row reveal" style="--c: var(--hot)">
-        <p class="layer-no">05</p>
+      <li class="layer" data-layer-text="5" style="--c: var(--coral)">
+        <p class="layer-no" aria-hidden="true">05</p>
         <div>
-          <h3>Task layer <span class="badge badge-plan">planned</span></h3>
-          <p>An A2A entry point that accepts tasks for agents and queues them with Hatchet, written in Go, on a platform PostgreSQL run by CloudNativePG (in review).</p>
-          <p class="chips"><span>A2A</span><span>Hatchet</span><span>Go</span><span>CloudNativePG</span></p>
+          <h3>Task layer <span class="badge badge-wip">in review</span></h3>
+          <p>The front door: a dispatcher that accepts tasks for agents over the A2A protocol, queues them with Hatchet and hands each to its agent. The PostgreSQL it keeps its records in is on main. Its design, the queue and A2A in the agent image are in review; the dispatcher itself, a Go service, is not written yet.</p>
+          <p class="chips"><span>A2A</span><span>Hatchet</span><span>Go</span><span>PostgreSQL</span></p>
         </div>
       </li>
     </ol>
   </div>
 </section>
 
-<section id="principles" class="section principles" aria-labelledby="principles-title">
+<section id="status" class="section" aria-labelledby="status-title">
   <div class="section-head reveal">
-    <p class="eyebrow">03 · Principles</p>
-    <h2 id="principles-title">Rules of <span class="hl-orange">the night</span>.</h2>
+    <p class="eyebrow"><b>04</b> Status</p>
+    <h2 id="status-title" class="display">Not finished,<br><span class="sea">and it says so.</span></h2>
+    <p class="intro">A cluster has one server today, and nothing rolls a host back automatically after a bad change. Below: what is on main, what is in review, and what is decided but not built.</p>
   </div>
-  <ul class="tiles reveal">
-    <li class="tile"><span class="tile-no">i</span><h3>Deny by default</h3><p>One port open from outside. Nothing in the cluster reachable from the internet. Pod Security <code>restricted</code> unless a namespace trades it for pinned images.</p></li>
-    <li class="tile"><span class="tile-no">ii</span><h3>Public modules, private fleet</h3><p>Reusable code in the open; IPs, disk ids, keys and secrets only in your private repository. <a href="/docs/adr/0001-public-modules-private-fleet/">ADR 0001</a></p></li>
-    <li class="tile"><span class="tile-no">iii</span><h3>Upstream first</h3><p>Upstream NixOS options and established tools before own code; an option exists only when a consumer needs it.</p></li>
-    <li class="tile"><span class="tile-no">iv</span><h3>Declarative &amp; reproducible</h3><p>Every host, manifest, image and this website is a Nix build of a pinned flake.</p></li>
-    <li class="tile"><span class="tile-no">v</span><h3>Decisions on record</h3><p>Every choice that is hard to reverse gets an <a href="/docs/#decisions">architecture decision record</a>, with the options it beat.</p></li>
-    <li class="tile"><span class="tile-no">vi</span><h3>One atomic PR per change</h3><p>An issue and a pull request for each change, reviewed and merged by a human, in Conventional Commits.</p></li>
-    <li class="tile"><span class="tile-no">vii</span><h3>Proven on real servers</h3><p>CI evaluates; behaviour is verified on real Hetzner machines, not in mocks. <a href="/docs/adr/0015-ci-evaluation-only/">ADR 0015</a></p></li>
-    <li class="tile tile-cta"><a href="{{ site.repo }}/blob/main/AGENTS.md"><span class="tile-no">∞</span><h3>The whole rulebook</h3><p>Every contributor, human or agent, works by <code>AGENTS.md</code>. <span aria-hidden="true">→</span></p></a></li>
-  </ul>
-</section>
-
-<section id="status" class="section status" aria-labelledby="status-title">
-  <div class="section-head reveal">
-    <p class="eyebrow">04 · Status</p>
-    <h2 id="status-title">Work in progress,<br><span class="outline">in the open.</span></h2>
-    <p class="intro">A cluster has one server node today. Here is what is on main, what is in review, and what is decided but not built yet.</p>
+  <div class="meter reveal" aria-hidden="true">
+    <i style="--n: {{ status.shipped.length }}; --c: var(--teal)"></i>
+    <i style="--n: {{ status.inProgress.length }}; --c: var(--amber)"></i>
+    <i style="--n: {{ status.planned.length }}; --c: var(--violet)"></i>
   </div>
-  <div class="status-cols">
+  <div class="board">
     {% for col in [
-      { key: "shipped", title: "Shipped", cls: "ok", items: status.shipped },
-      { key: "progress", title: "In review", cls: "wip", items: status.inProgress },
-      { key: "planned", title: "Planned", cls: "plan", items: status.planned }
+      { title: "Shipped", cls: "full", colour: "var(--teal)", items: status.shipped },
+      { title: "In review", cls: "", colour: "var(--amber)", items: status.inProgress },
+      { title: "Planned", cls: "", colour: "var(--violet)", items: status.planned }
     ] %}
-    <div class="status-col status-{{ col.cls }} reveal">
-      <h3><span class="pip" aria-hidden="true"></span>{{ col.title }} <span class="count">{{ col.items.length }}</span></h3>
+    <div class="column {{ col.cls }} reveal" style="--c: {{ col.colour }}">
+      <h3>{{ col.title }} <span>{{ col.items.length }}</span></h3>
       <ul>
         {% for item in col.items %}
         <li>
@@ -169,56 +221,56 @@ preload:
   </div>
 </section>
 
-<section id="start" class="section start" aria-labelledby="start-title">
+<section id="start" class="section aura" style="--aura: rgb(255 107 74 / 0.14); --aura-x: 55%; --aura-y: 20%" aria-labelledby="start-title">
   <div class="start-grid">
-    <div class="section-head reveal">
-      <p class="eyebrow">05 · Get started</p>
-      <h2 id="start-title">Roll out<br><span class="hl-teal">your fleet.</span></h2>
-      <p class="intro">Create the private repository from the template, then follow its README: sops setup, adding a host, installing, unlocking, updating.</p>
+    <div class="reveal">
+      <p class="eyebrow"><b>05</b> Get started</p>
+      <h2 id="start-title" class="display">Install your<br><span class="sun">first host.</span></h2>
+      <p class="intro">You need a Hetzner dedicated server, Nix on your own machine, an SSH key and a key for sops. Create your private repository from the template; its README explains every step below.</p>
       <ol class="steps">
-        <li><span><code>backfabric keygen</code> host keys and the LUKS passphrase</span></li>
-        <li><span><code>backfabric sops add-host</code> the host can decrypt its secrets</span></li>
-        <li><span><code>backfabric probe</code> boots the installer, writes the facter report</span></li>
-        <li><span><code>backfabric install</code> partitions, encrypts, installs NixOS</span></li>
-        <li><span><code>backfabric unlock</code> sends the passphrase to the initrd</span></li>
-        <li><span><code>backfabric finalize</code> drops the local keys once the passphrase is in your password manager</span></li>
-        <li><span><code>backfabric deploy</code> applies the host's committed configuration</span></li>
+        <li><span><code>backfabric keygen</code> creates the server's host keys and disk passphrase, on your machine</span></li>
+        <li><span><code>backfabric sops add-host</code> lets the server decrypt its secrets</span></li>
+        <li><span><code>backfabric probe</code> boots the installer on the server and records its hardware</span></li>
+        <li><span><code>backfabric install</code> erases the disks, encrypts them and installs NixOS</span></li>
+        <li><span><code>backfabric unlock</code> sends the passphrase so the server can boot</span></li>
+        <li><span><code>backfabric finalize</code> deletes the local keys once the passphrase is in your password manager</span></li>
+        <li><span><code>backfabric deploy</code> applies each later change you commit</span></li>
       </ol>
       <div class="cta">
-        <a class="btn btn-hot" href="/docs/template/">Template README</a>
-        <a class="btn btn-ghost" href="/docs/fleet-shell/">Installing a host</a>
+        <a class="btn btn-sun" href="/docs/template/">The full walkthrough</a>
+        <a class="btn btn-glass" href="/docs/fleet-shell/">How installing works</a>
       </div>
     </div>
-    <div class="terminal reveal" role="group" aria-label="Commands to create the private repository">
+    <div class="terminal reveal" data-typed role="group" aria-label="Commands to create the private repository">
       <div class="terminal-bar" aria-hidden="true"><i></i><i></i><i></i><span>~/fleet</span></div>
-<pre><code><span class="c"># a new private repository</span>
-<span class="p">$</span> mkdir fleet &amp;&amp; cd fleet
-<span class="p">$</span> nix flake init -t github:backfabric/infra
-<span class="p">$</span> git init &amp;&amp; git add -A
-<span class="p">$</span> git commit -m "chore: initial fleet repository"
-
-<span class="c"># the fleet dev shell</span>
-<span class="p">$</span> direnv allow   <span class="c"># or: nix develop</span>
-<span class="p">$</span> backfabric sops init --age age1...</code></pre>
+      <pre><span data-line class="c"># a new private repository</span><span data-line><span class="p">$</span> <span data-cmd>mkdir fleet &amp;&amp; cd fleet</span></span><span data-line><span class="p">$</span> <span data-cmd>nix flake init -t github:backfabric/infra</span></span><span data-line><span class="p">$</span> <span data-cmd>git init &amp;&amp; git add -A</span></span><span data-line><span class="p">$</span> <span data-cmd>git commit -m "chore: initial fleet repository"</span></span><span data-line>&nbsp;</span><span data-line class="c"># the dev shell, then your sops key</span><span data-line><span class="p">$</span> <span data-cmd>direnv allow</span>   <span class="c"># or: nix develop</span></span><span data-line><span class="p">$</span> <span data-cmd>backfabric sops init --age age1...</span></span></pre>
     </div>
   </div>
+</section>
+
+<section id="principles" class="section" aria-labelledby="principles-title">
+  <div class="section-head reveal">
+    <p class="eyebrow"><b>06</b> How it is built</p>
+    <h2 id="principles-title" class="display">Four rules<br>behind <span class="sun">the code</span>.</h2>
+    <p class="intro">The full set, for people and coding agents alike, is in <a href="{{ site.repo }}/blob/main/AGENTS.md"><code>AGENTS.md</code></a>.</p>
+  </div>
+  <ul class="rules reveal">
+    <li><i class="sun" aria-hidden="true">i</i><h3>Upstream first</h3><p>NixOS's own options and established tools come before code of our own. Less custom code means less to audit.</p></li>
+    <li><i class="sun" aria-hidden="true">ii</i><h3>Built from code</h3><p>Every host, every Kubernetes manifest and the agent image are built by Nix from pinned inputs. The same commit gives the same system.</p></li>
+    <li><i class="sun" aria-hidden="true">iii</i><h3>Decisions on record</h3><p>Every choice that is hard to reverse has a short <a href="/docs/#decisions">decision record</a>: what was decided, and which options lost.</p></li>
+    <li><i class="sun" aria-hidden="true">iv</i><h3>Tested on real servers</h3><p>CI checks that everything evaluates, and builds the agent image and this site. Whether a host boots and behaves is checked on real Hetzner machines, not in mocks. <a href="/docs/adr/0015-ci-evaluation-only/">ADR 0015</a></p></li>
+  </ul>
 </section>
 
 <section class="finale" aria-labelledby="finale-title">
-  <div class="finale-art" aria-hidden="true">
-    {{ layer(scene.sky, "art", true) }}
-    {{ layer(scene.city, "art", true) }}
-    {{ layer(scene.palmB, "palm palm-b", true) }}
-    {{ layer(scene.palmC, "palm palm-c", true) }}
-    {{ layer(scene.palmA, "palm palm-a", true) }}
-    {{ layer(scene.thicket, "thicket thicket-left", true) }}
-    {{ layer(scene.thicket, "thicket thicket-right", true) }}
-  </div>
-  <div class="finale-inner reveal">
-    <h2 id="finale-title">Read the source.<br><span class="hl-sun">Run the night.</span></h2>
+  <canvas class="cloth" data-cloth data-seed="3" data-night="1" data-horizon="0.42" aria-hidden="true"></canvas>
+  <div class="finale-inner">
+    <h2 id="finale-title" class="display reveal">Bare metal by day.<br><span class="sea">Agents by night.</span></h2>
     <div class="cta">
-      <a class="btn btn-hot" href="{{ site.repo }}">backfabric/infra on GitHub <span aria-hidden="true">↗</span></a>
-      <a class="btn btn-ghost" href="/docs/#decisions">{{ repo.adrs.length }} decision records</a>
+      <a class="btn btn-sun" href="{{ site.repo }}">backfabric/infra on GitHub <span aria-hidden="true">↗</span></a>
+      <a class="btn btn-glass" href="/docs/#decisions">{{ repo.adrs.length }} decision records</a>
     </div>
   </div>
+  <p class="colossus" aria-hidden="true">backfabric</p>
 </section>
+</div>

@@ -3,38 +3,44 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% if title %}{{ title }} · {% endif %}{{ site.name }}</title>
+<title>{% if title %}{{ title }} · {{ site.name }}{% else %}{{ site.name }} · {{ site.tagline }}{% endif %}</title>
 <meta name="description" content="{{ description or site.description }}">
 <meta name="color-scheme" content="{{ 'dark' if theme == 'theme-dark' else 'dark light' }}">
-<meta name="theme-color" content="#12081f">
+{%- if theme == 'theme-dark' %}
+<meta name="theme-color" content="#07051a">
+{%- else %}
+<meta name="theme-color" content="#faf6f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#07051a" media="(prefers-color-scheme: dark)">
+{%- endif %}
 <meta name="referrer" content="no-referrer">
 <link rel="canonical" href="{{ site.url }}{{ page.url }}">
-<meta property="og:title" content="{{ title or site.name }}">
+<meta property="og:site_name" content="{{ site.name }}">
+<meta property="og:title" content="{{ title or (site.name + ' · ' + site.tagline) }}">
 <meta property="og:description" content="{{ description or site.description }}">
 <meta property="og:url" content="{{ site.url }}{{ page.url }}">
 <meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
 <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
 <link rel="preload" href="/assets/fonts/anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
-{%- for href in preload %}
-<link rel="preload" href="{{ href }}" as="image" type="image/svg+xml">
-{%- endfor %}
-<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="{{ assets.css }}">
+<script type="module" src="{{ assets.js }}"></script>
 </head>
 <body class="{{ bodyClass }}">
 <a class="skip" href="#main">Skip to content</a>
-<header class="topbar">
+<header class="bar" data-bar>
   <a class="brand" href="/" aria-label="backfabric home">
-    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><use href="/assets/mark.svg#mark"/></svg>
+    <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="weft" x1="0" x2="1"><stop offset="0" stop-color="#ff2e88"/><stop offset="1" stop-color="#ffc266"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="#151036"/><path d="M11 5v22M21 5v22" stroke="#2ff3e0" stroke-width="4"/><path d="M5 10h22M5 22h22M5 16h4M13 16h6M23 16h4" stroke="url(#weft)" stroke-width="4"/><path d="M11 20v4M21 8v4" stroke="#2ff3e0" stroke-width="4"/></svg>
     <span>backfabric</span>
   </a>
   <nav aria-label="Main">
     <ul>
-      <li><a href="/#stack">Stack</a></li>
-      <li><a href="/#status">Status</a></li>
-      <li><a href="/#start">Start</a></li>
+      <li class="away"><a href="/#why">Why</a></li>
+      <li class="away"><a href="/#stack">Stack</a></li>
+      <li class="away"><a href="/#status">Status</a></li>
+      <li class="away"><a href="/#start">Start</a></li>
       <li><a href="/docs/"{% if page.url.startsWith('/docs/') %} aria-current="page"{% endif %}>Docs</a></li>
-      <li><a href="{{ site.repo }}">GitHub</a></li>
+      <li><a class="pill" href="{{ site.repo }}">GitHub</a></li>
     </ul>
   </nav>
 </header>
@@ -43,9 +49,8 @@
 </main>
 <footer class="footer">
   <div class="footer-inner">
-    <p class="footer-brand">backfabric</p>
     <p>Free software under the <a href="{{ site.repo }}/blob/main/LICENSE">MIT license</a>. Source, issues and pull requests on <a href="{{ site.repo }}">GitHub</a>.</p>
-    <p class="fine">This site is built from the repository by CI. No cookies, no trackers, no third-party requests. Fonts under the SIL Open Font License 1.1: <a href="/assets/fonts/anton-OFL.txt">Anton</a>, <a href="/assets/fonts/inter-OFL.txt">Inter</a>, <a href="/assets/fonts/jetbrains-mono-OFL.txt">JetBrains Mono</a>.</p>
+    <p class="fine">Built from the repository by CI. No cookies, no trackers, no third-party requests. Fonts under the SIL Open Font License 1.1: <a href="/assets/fonts/anton-OFL.txt">Anton</a>, <a href="/assets/fonts/inter-OFL.txt">Inter</a>, <a href="/assets/fonts/jetbrains-mono-OFL.txt">JetBrains Mono</a>.</p>
   </div>
 </footer>
 </body>

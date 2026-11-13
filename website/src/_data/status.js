@@ -1,5 +1,5 @@
 // What is on main, what is in review, and what is decided but not built.
-// Every entry links the pull requests or issues it rests on.
+// Every entry links the pull requests, issues or decision records it rests on.
 const pr = (n) => ({ label: `#${n}`, href: `https://github.com/backfabric/infra/pull/${n}` });
 const issue = (n) => ({ label: `#${n}`, href: `https://github.com/backfabric/infra/issues/${n}` });
 const adr = (n, slug) => ({ label: `ADR ${n}`, href: `/docs/adr/${n}-${slug}/` });
@@ -8,7 +8,7 @@ export default {
   shipped: [
     {
       title: "Encrypted disks",
-      text: "LUKS on every disk, one btrfs raid1 across them, GRUB mirrored to every disk for BIOS and UEFI.",
+      text: "LUKS on every system disk, one btrfs across them (raid1 with two or more), GRUB mirrored to every disk for BIOS and UEFI.",
       links: [pr(4), adr("0003", "btrfs-raid1-over-luks")],
     },
     {
@@ -19,16 +19,16 @@ export default {
     {
       title: "Closed hosts",
       text: "Root SSH with keys only, the one open port in nftables; no ping replies, IPv4 only.",
-      links: [pr(6), pr(33), pr(40)],
+      links: [pr(6), pr(33), pr(40), adr("0018", "key-only-ssh-without-hiding")],
     },
     {
       title: "Secrets with sops-nix",
-      text: "Hosts decrypt with their SSH host key; .sops.yaml maintained by commands.",
+      text: "Hosts decrypt with their SSH host key; .sops.yaml is maintained by commands.",
       links: [pr(8), pr(12)],
     },
     {
       title: "The backfabric command",
-      text: "keygen, probe, install, unlock, finalize, deploy: restartable steps in a fleet dev shell.",
+      text: "keygen, probe, install, unlock, finalize, deploy: steps that can be run again, in a dev shell.",
       links: [pr(10), pr(14), pr(18), pr(29)],
     },
     {
@@ -38,7 +38,7 @@ export default {
     },
     {
       title: "Hardened k3s",
-      text: "Embedded etcd, CIS hardening guide, Pod Security restricted, audit log, secretbox, no NodePort or LoadBalancer; k3s 1.36.",
+      text: "Embedded etcd, the CIS hardening guide, Pod Security restricted, an audit log, secretbox, no NodePort or LoadBalancer; k3s 1.36.",
       links: [pr(37), pr(50), adr("0017", "cluster-hardening-defaults")],
     },
     {
@@ -66,34 +66,39 @@ export default {
       text: "Namespaces that skip Pod Security may run digest-pinned images only.",
       links: [pr(66), adr("0024", "pod-security-exemptions-for-pinned-images")],
     },
-  ],
-  inProgress: [
     {
       title: "Agent Substrate runtime",
-      text: "Agents as actors in gVisor sandboxes, suspended between tasks and resumed, egress through a gateway.",
-      links: [pr(48), issue(47)],
-    },
-    {
-      title: "API key at the egress gateway",
-      text: "The gateway injects the OpenAI key; the agent never holds it and continues its session.",
-      links: [pr(60), issue(59)],
+      text: "Agents as actors in gVisor sandboxes on warm worker pods, suspended to snapshots between tasks and resumed on the next request.",
+      links: [pr(48), adr("0023", "agent-substrate-runtime")],
     },
     {
       title: "Platform PostgreSQL",
-      text: "One PostgreSQL in the cluster, run by CloudNativePG, for platform services.",
-      links: [pr(68), issue(67)],
+      text: "One PostgreSQL in the cluster for platform services, run by CloudNativePG; no backups yet.",
+      links: [pr(68), adr("0025", "platform-postgres-with-cloudnativepg")],
+    },
+  ],
+  inProgress: [
+    {
+      title: "Design of the dispatcher",
+      text: "The record of the single A2A entry point for agent tasks, a Go service, before any of its code.",
+      links: [pr(80), issue(79)],
     },
     {
-      title: "Flux for agent workloads",
-      text: "Agent workloads synced from the private repository.",
-      links: [pr(44), issue(43)],
+      title: "Agents speak A2A",
+      text: "The agent image serves A2A 1.0: one actor is one session, one task at a time.",
+      links: [pr(82), issue(81)],
+    },
+    {
+      title: "Task queue with Hatchet",
+      text: "Hatchet in the cluster, on the platform PostgreSQL, as the queue behind the dispatcher.",
+      links: [pr(84), issue(83)],
     },
   ],
   planned: [
     {
-      title: "A2A task entry point",
-      text: "A front door for agent tasks over A2A, queued with Hatchet, written in Go; its store is the platform PostgreSQL.",
-      links: [issue(67)],
+      title: "External Secrets Operator",
+      text: "Syncs values from OpenBao into ordinary Kubernetes Secrets, so pods consume them unchanged.",
+      links: [adr("0009", "openbao-on-host-with-eso")],
     },
     {
       title: "Pull deploys with comin",
