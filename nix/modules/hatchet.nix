@@ -539,7 +539,13 @@ let
           run_job "token-$client" k8s create-worker-token --namespace ${namespace} --resource-name "hatchet-token-$client"
         fi
         kubectl -n ${namespace} label --overwrite secret "hatchet-token-$client" "${clientLabel}=$client" >/dev/null
-        exists namespace "$client" || kubectl create namespace "$client"
+        # The namespace belongs to the module that runs the client, which
+        # creates it with its NetworkPolicies; the token is copied on a
+        # later run once it exists.
+        if ! exists namespace "$client"; then
+          echo "The namespace $client does not exist yet; its token is copied once it does (systemctl start hatchet-credentials)."
+          continue
+        fi
         kubectl -n ${namespace} get secret "hatchet-token-$client" -o json |
           CLIENT=$client jq '{
             apiVersion: "v1", kind: "Secret",
@@ -580,8 +586,9 @@ in
         (${engineAddress}, without TLS). Each gets the Secret
         `hatchet-client-token` with a token of the default tenant and the
         Hatchet SDK's variables (HATCHET_CLIENT_TOKEN,
-        HATCHET_CLIENT_HOST_PORT, HATCHET_CLIENT_TLS_STRATEGY), and is
-        created if it does not exist.
+        HATCHET_CLIENT_HOST_PORT, HATCHET_CLIENT_TLS_STRATEGY). The
+        namespaces are created by the modules that run the clients, not
+        here; one that does not exist yet is skipped until it does.
       '';
     };
   };

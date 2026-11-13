@@ -82,7 +82,8 @@
   };
 
   # Hatchet on the platform PostgreSQL (database `hatchet`), with a client
-  # token in the Secret `hatchet-client-token` of the namespace `dispatcher`.
+  # token in the Secret `hatchet-client-token` of the namespace `dispatcher`
+  # once the module that runs the dispatcher has created it.
   backfabric.hatchet = {
     enable = true;
     clientNamespaces = [ "dispatcher" ];

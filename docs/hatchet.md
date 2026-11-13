@@ -90,7 +90,12 @@ curl -s -X POST localhost:8080/api/v1/users/register -H 'Content-Type: applicati
 ## Clients
 
 A pod in a namespace of `clientNamespaces` reaches the engine and loads
-the Hatchet SDK's settings from the Secret `hatchet-client-token`:
+the Hatchet SDK's settings from the Secret `hatchet-client-token`. The
+namespace belongs to the module that runs the client, which creates it
+with its NetworkPolicies; `hatchet-credentials` does not create it, and
+skips a listed namespace that does not exist yet (it logs so), copying the
+token at its next run (the next deployment, or `systemctl start
+hatchet-credentials`).
 
 ```yaml
 envFrom:
@@ -107,51 +112,79 @@ results) do not. A pod in any other namespace has its connections to the
 engine refused (kube-router rejects them): the SDK fails with gRPC
 `UNAVAILABLE` "Connection refused" at once, not after a timeout.
 
-### Smoke test
+### Engine access check
 
-A real worker and a run, with the Python SDK, in a client namespace (here
-`dispatcher`). The pod installs the SDK from PyPI, so the namespace needs
-egress to the internet.
+A plain TCP connection to the engine from a namespace, with the engine's
+own image (pinned; nothing is downloaded at runtime). On the host, as
+root. `hatchet_test_ns` creates a namespace as a client's module would:
+default deny for ingress and egress, egress only to DNS and the engine.
 
 ```sh
-cat >/tmp/hatchet-smoke.yaml <<'YAML'
+hatchet_test_ns() {
+  kubectl apply -f - <<YAML
+apiVersion: v1
+kind: Namespace
+metadata: { name: $1 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny, namespace: $1 }
+spec: { podSelector: {}, policyTypes: [Ingress, Egress] }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: dns-and-hatchet-engine, namespace: $1 }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to: [ { namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }, podSelector: { matchLabels: { k8s-app: kube-dns } } } ]
+      ports: [ { protocol: UDP, port: 53 }, { protocol: TCP, port: 53 } ]
+    - to: [ { namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: hatchet } }, podSelector: { matchLabels: { app.kubernetes.io/name: hatchet-engine } } } ]
+      ports: [ { protocol: TCP, port: 7070 } ]
+YAML
+}
+
+# Prints "connected" or "refused" (it retries for 10 s: kube-router admits
+# a new pod's address with a delay).
+hatchet_tcp_check() {
+  kubectl apply -f - <<YAML
 apiVersion: v1
 kind: Pod
-metadata: { name: hatchet-smoke, namespace: dispatcher }
+metadata: { name: hatchet-tcp-check, namespace: $1 }
 spec:
   restartPolicy: Never
-  securityContext: { runAsNonRoot: true, runAsUser: 1000, seccompProfile: { type: RuntimeDefault } }
+  automountServiceAccountToken: false
+  securityContext: { runAsNonRoot: true, runAsUser: 65532, seccompProfile: { type: RuntimeDefault } }
   containers:
-    - name: worker
-      image: docker.io/library/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
-      securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
-      envFrom: [ { secretRef: { name: hatchet-client-token } } ]
-      env: [ { name: HOME, value: /tmp }, { name: PYTHONPATH, value: /tmp/py:/tmp } ]
+    - name: check
+      image: ghcr.io/hatchet-dev/hatchet/hatchet-engine:v0.114.2@sha256:247120b5fabb0085784d3adcf4aebfaca670a400c950d7f53d7ea95c858b4f21
+      securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
       command:
-        - sh
+        - bash
         - -c
         - |
-          pip install -q --target /tmp/py hatchet-sdk==1.45.1
-          cat >/tmp/smoke.py <<'PY'
-          from hatchet_sdk import Context, EmptyModel, Hatchet
-          hatchet = Hatchet()
-          @hatchet.task(name="smoke")
-          def smoke(input: EmptyModel, ctx: Context) -> dict:
-              return {"ok": True}
-          if __name__ == "__main__":
-              hatchet.worker("smoke-worker", workflows=[smoke]).start()
-          PY
-          exec python /tmp/smoke.py
+          for i in \$(seq 10); do
+            timeout 3 bash -c 'exec 3<>/dev/tcp/hatchet-engine.hatchet.svc/7070' 2>/dev/null && echo connected && exit 0
+            sleep 1
+          done
+          echo refused; exit 1
 YAML
-kubectl apply -f /tmp/hatchet-smoke.yaml
-kubectl -n dispatcher wait --for=condition=Ready pod/hatchet-smoke --timeout=180s
-until kubectl -n dispatcher exec hatchet-smoke -- test -f /tmp/smoke.py; do sleep 2; done   # pip install
-kubectl -n dispatcher exec hatchet-smoke -- python -c 'from smoke import smoke; print(smoke.run())'
-# {'ok': True}  (the run is queued until the worker has registered)
-kubectl -n dispatcher delete pod hatchet-smoke
+  until [[ $(kubectl -n "$1" get pod hatchet-tcp-check -o jsonpath='{.status.phase}') =~ Succeeded|Failed ]]; do sleep 2; done
+  kubectl -n "$1" logs hatchet-tcp-check
+  kubectl -n "$1" delete pod hatchet-tcp-check >/dev/null
+}
 ```
 
-The run and the worker `smoke-worker` appear in the dashboard.
+```sh
+hatchet_test_ns dispatcher        # a namespace in clientNamespaces
+hatchet_tcp_check dispatcher      # connected
+hatchet_test_ns hatchet-denied    # not in clientNamespaces
+hatchet_tcp_check hatchet-denied  # refused
+kubectl delete namespace hatchet-denied
+```
+
+Whether Hatchet runs workflows is proven by the dispatcher's worker.
 
 ### Rotate a token
 
@@ -169,9 +202,8 @@ Tokens); `hatchet-admin` has no command for it.
 Remove it from `clientNamespaces` and deploy: NetworkPolicy no longer
 admits it, and `hatchet-credentials` deletes the Secrets it labelled
 `backfabric.io/hatchet-client=<namespace>`: `hatchet/hatchet-token-<namespace>`
-and `<namespace>/hatchet-client-token`. The namespace itself stays (it may
-have been created by `hatchet-credentials`; delete it by hand if nothing
-else uses it). The token stays valid until 2126 (Hatchet issues tenant
+and `<namespace>/hatchet-client-token`. The namespace itself stays: it belongs
+to the module that created it. The token stays valid until 2126 (Hatchet issues tenant
 tokens for 100 years); revoke it in the dashboard (Settings, API Tokens;
 it is named `default`, created at the time in the unit's journal).
 
@@ -191,7 +223,8 @@ it. In order, each step only if its Secret is missing:
    `hatchet-admin k8s create-worker-token`, which writes a token (valid for
    100 years) into `hatchet-token-<namespace>`.
 
-Then it copies every token into its namespace (created if missing), and
+Then it copies every token into its namespace (skipped, with a log line,
+while the namespace does not exist), and
 deletes the labelled token Secrets of namespaces no longer listed. The
 Jobs run as the service account `hatchet-setup`, which may only create
 Secrets in `hatchet` and read or update the ones it writes; they are
@@ -226,8 +259,7 @@ What stays:
 - the database `hatchet` and its role (reclaim policy `retain`), with
   rows encrypted with the deleted keys and the old admin;
 - the Secrets `hatchet-client-token` in the client namespaces, with tokens
-  no new key accepts, and the client namespaces themselves (also those
-  `hatchet-credentials` created).
+  no new key accepts (the client namespaces belong to their modules).
 
 Hatchet holds only ids (ADR 0027): the dispatcher's own record is
 canonical. So before enabling it again, drop the database, on the host:
