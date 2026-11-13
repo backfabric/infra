@@ -1,0 +1,5 @@
+{# A layer of the artwork (src/_data/scene.js) as a decorative image. #}
+{% macro layer(art, class, lazy=false) %}<img class="{{ class }}" src="{{ art.src }}" width="{{ art.width }}" height="{{ art.height }}" alt=""{% if art.foot %} style="--foot: {{ art.foot }}%"{% endif %}{% if lazy %} loading="lazy"{% endif %} decoding="async">{% endmacro %}
+
+{# The layers as custom properties, for a header that shows a strip of the picture as backgrounds. #}
+{% macro strip(scene) %}style="--sky: url('{{ scene.sky.src }}'); --city: url('{{ scene.city.src }}'); --palm: url('{{ scene.palmB.src }}')"{% endmacro %}

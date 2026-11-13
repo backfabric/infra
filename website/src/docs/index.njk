@@ -4,7 +4,8 @@ title: Docs
 description: Runbooks and architecture decision records of backfabric, rendered from the repository.
 bodyClass: docs
 ---
-<header class="docs-hero">
+{% from "art.njk" import strip %}
+<header class="docs-hero" {{ strip(scene) }}>
   <p class="eyebrow">Documentation</p>
   <h1 class="display">Docs</h1>
   <p class="intro">Rendered from the repository on every change to main: the README, the template's README, the runbooks in <a href="{{ site.repo }}/tree/main/docs"><code>docs/</code></a> and the decision records in <a href="{{ site.repo }}/tree/main/docs/adr"><code>docs/adr/</code></a>.</p>

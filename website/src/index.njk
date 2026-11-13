@@ -3,9 +3,16 @@ layout: base.njk
 theme: theme-dark
 bodyClass: home
 statement: An agent runs code it wrote a minute ago and reads whatever the web hands it. backfabric assumes it will misbehave one day, and limits what it can reach and what it can hide.
+preload:
+  - sky
+  - city
 ---
-<section class="hero" aria-labelledby="hero-title">
-  <canvas class="cloth" data-cloth data-seed="0" data-room="1" data-sets="1" data-horizon-below="#hero-title" aria-hidden="true"></canvas>
+{% from "art.njk" import layer %}
+<section class="hero" data-scene aria-labelledby="hero-title">
+  <div class="scene scene-back" aria-hidden="true">
+    {{ layer(scene.sky, "art art-sky") }}
+    {{ layer(scene.city, "art art-city") }}
+  </div>
   <div class="hero-inner">
     <p class="kicker"><i aria-hidden="true"></i> Open source · NixOS · MIT</p>
     <h1 id="hero-title" class="wordmark">backfabric</h1>
@@ -18,6 +25,13 @@ statement: An agent runs code it wrote a minute ago and reads whatever the web h
       </div>
     </div>
   </div>
+  {# In front of the wordmark, behind the words. #}
+  <div class="scene scene-front" aria-hidden="true">
+    {{ layer(scene.palmA, "palm palm-a") }}
+    {{ layer(scene.palmB, "palm palm-b") }}
+    {{ layer(scene.thicket, "thicket thicket-left") }}
+    {{ layer(scene.thicket, "thicket thicket-right") }}
+  </div>
   <p class="facts">
     <span><b>{{ status.shipped.length }}</b>shipped</span>
     <span><b>{{ status.inProgress.length }}</b>in review</span>
@@ -25,6 +39,12 @@ statement: An agent runs code it wrote a minute ago and reads whatever the web h
     <span><b>{{ repo.adrs.length }}</b>decision records</span>
   </p>
 </section>
+
+<div class="marquee" aria-hidden="true">
+  <div class="marquee-track">
+    {% for i in [1, 2] %}<span>LUKS</span><b>✦</b><span>btrfs raid1</span><b>✦</b><span>unlock over SSH</span><b>✦</b><span>k3s</span><b>✦</b><span>CIS hardened</span><b>✦</b><span>OpenBao</span><b>✦</b><span>OpenTelemetry</span><b>✦</b><span>Agent Substrate</span><b>✦</b><span>gVisor</span><b>✦</b><span>PostgreSQL</span><b>✦</b>{% endfor %}
+  </div>
+</div>
 
 <div class="sheet">
 <section id="why" class="section aura" aria-labelledby="why-title">
@@ -263,14 +283,21 @@ statement: An agent runs code it wrote a minute ago and reads whatever the web h
 </section>
 
 <section class="finale" aria-labelledby="finale-title">
-  <canvas class="cloth" data-cloth data-seed="3" data-night="1" data-horizon="0.42" aria-hidden="true"></canvas>
+  <div class="scene scene-back" aria-hidden="true">
+    {{ layer(scene.sky, "art", true) }}
+    {{ layer(scene.city, "art", true) }}
+    {{ layer(scene.palmC, "palm palm-c", true) }}
+    {{ layer(scene.palmA, "palm palm-a", true) }}
+    {{ layer(scene.palmB, "palm palm-b", true) }}
+    {{ layer(scene.thicket, "thicket thicket-left", true) }}
+    {{ layer(scene.thicket, "thicket thicket-right", true) }}
+  </div>
   <div class="finale-inner">
-    <h2 id="finale-title" class="display reveal">Bare metal by day.<br><span class="sea">Agents by night.</span></h2>
+    <h2 id="finale-title" class="display reveal">Bare metal by day.<br><span class="sun">Agents by night.</span></h2>
     <div class="cta">
       <a class="btn btn-sun" href="{{ site.repo }}">backfabric/infra on GitHub <span aria-hidden="true">↗</span></a>
       <a class="btn btn-glass" href="/docs/#decisions">{{ repo.adrs.length }} decision records</a>
     </div>
   </div>
-  <p class="colossus" aria-hidden="true">backfabric</p>
 </section>
 </div>
