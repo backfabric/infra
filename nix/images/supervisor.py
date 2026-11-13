@@ -9,9 +9,9 @@ modes chosen by the environment:
   that sends that variable as the bearer token. No login.
 - ChatGPT: otherwise; the device-code login with the user's subscription.
 
-Tasks may name a thread: its first task starts a Codex session, later ones
-resume it. There is no authentication: the actor is reachable only through
-Agent Substrate's router, which decides who may call it.
+The actor is one agent session: its first task starts a Codex session, every
+later task resumes it. There is no authentication: the actor is reachable
+only through Agent Substrate's router, which decides who may call it.
 """
 
 import json
@@ -29,7 +29,7 @@ PORT = 8080
 HOME = os.environ["HOME"]
 CODEX_HOME = os.environ["CODEX_HOME"]
 WORKDIR = os.path.join(HOME, "work")
-THREADS = os.path.join(HOME, "threads.json")
+SESSION_FILE = os.path.join(HOME, "codex-session")  # the session's id
 CONFIG = os.path.join(CODEX_HOME, "config.toml")
 API_KEY_ENV = "AGENT_OPENAI_API_KEY"
 API_KEY_MODE = bool(os.environ.get(API_KEY_ENV, "").strip())
@@ -94,11 +94,11 @@ def write_atomic(path, text):
     os.replace(tmp, path)
 
 
-def load_threads():
-    if not os.path.exists(THREADS):
-        return {}
-    with open(THREADS) as f:
-        return json.load(f)
+def load_session():
+    if not os.path.exists(SESSION_FILE):
+        return None
+    with open(SESSION_FILE) as f:
+        return f.read().strip() or None
 
 
 def start_login():
@@ -163,9 +163,8 @@ def login_status():
     }
 
 
-def run_task(prompt, thread):
+def run_task(prompt):
     result = {
-        "thread": thread,
         "session": None,
         "error": None,
         "exit_code": None,
@@ -175,7 +174,7 @@ def run_task(prompt, thread):
     }
     if not API_KEY_MODE and (status := login_status())["login_needed"]:
         return result | {"error": "needs_login", "message": status["status"]}
-    session = load_threads().get(thread) if thread else None
+    session = result["session"] = load_session()
     with tempfile.TemporaryDirectory() as tmp:
         last = os.path.join(tmp, "last-message.txt")
         # The actor is the sandbox (gVisor), so Codex runs commands without
@@ -227,10 +226,10 @@ def run_task(prompt, thread):
             result["message"] = event.get("error", {}).get("message", "")
     result["exit_code"] = proc.returncode
     result["stderr_tail"] = tail(stderr)
-    if thread and not session and result["session"]:
-        # Codex records the session as soon as it starts, so a thread whose
-        # first task failed continues that session, with whatever it did.
-        write_atomic(THREADS, json.dumps(load_threads() | {thread: result["session"]}))
+    if not session and result["session"]:
+        # Codex records the session as soon as it starts, so after a failed
+        # first task the next one continues it, with whatever it did.
+        write_atomic(SESSION_FILE, result["session"] + "\n")
     if timed_out:
         result["error"] = "timeout"
     elif proc.returncode != 0:
@@ -274,23 +273,17 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/task":
             try:
                 length = int(self.headers.get("Content-Length", 0))
-                body = json.loads(self.rfile.read(length))
-                prompt, thread = body["prompt"], body.get("thread")
+                prompt = json.loads(self.rfile.read(length))["prompt"]
                 if not isinstance(prompt, str) or not prompt.strip():
                     raise ValueError
-                if thread is not None and (not isinstance(thread, str) or not thread):
-                    raise ValueError
-            except (ValueError, KeyError, TypeError, AttributeError):
-                self.reply(
-                    400,
-                    {"error": 'expected JSON {"prompt": "...", "thread": "..." (optional)}'},
-                )
+            except (ValueError, KeyError, TypeError):
+                self.reply(400, {"error": 'expected JSON {"prompt": "..."}'})
                 return
             if not task_lock.acquire(blocking=False):
                 self.reply(409, {"error": "a task is already running"})
                 return
             try:
-                self.reply(200, run_task(prompt, thread))
+                self.reply(200, run_task(prompt))
             finally:
                 task_lock.release()
         else:
@@ -308,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
             path=self.path,
             status=status,
             duration_ms=round((time.monotonic() - self.started) * 1000),
-            **{k: body[k] for k in ("thread", "session", "error") if k in body},
+            **{k: body[k] for k in ("session", "error") if k in body},
         )
 
     def parse_request(self):

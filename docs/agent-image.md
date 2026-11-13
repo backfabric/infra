@@ -43,8 +43,8 @@ ActorTemplate and the clients must name 8080:
 ### State
 
 The home directory is the agent's state: Codex's configuration, login
-(`auth.json`, ChatGPT mode) and sessions in `/home/agent/.codex`, the
-supervisor's thread index `/home/agent/threads.json`, the tasks' working
+(`auth.json`, ChatGPT mode) and sessions in `/home/agent/.codex`, the id of
+the agent's Codex session `/home/agent/codex-session`, the tasks' working
 directory `/home/agent/work`. Snapshots of fidelity `SNAPSHOT_FIDELITY_MEMORY`
 or `ROOTFS` keep it across a suspend; mount a `durableDir` volume at
 `/home/agent` so it also survives a restore of volumes only. In ChatGPT mode
@@ -190,28 +190,28 @@ response is JSON; every request is logged as one JSON line on stdout.
 | `GET /healthz` | 200 `{"ok": true}` |
 | `GET /login` | API key: 200 `{"mode": "api_key", "login_needed": false}`. ChatGPT: 200 `{"mode": "chatgpt", "login_needed", "logged_in", "status", "login_running"}` from `codex login status`. |
 | `POST /login` | ChatGPT: starts `codex login --device-auth` and returns as soon as Codex prints the code: 200 `{"verification_url", "user_code"}`. Open the URL, enter the code; the login completes in the background. While it runs, another `POST /login` returns the same code. 502 with Codex's output if it printed none within 30 seconds. API key: 409, no login needed. |
-| `POST /task` `{"prompt": "...", "thread": "..."}` | Runs Codex in `/home/agent/work` and returns when it ends, 200 (a failed task is an `error`, not an HTTP error). 409 while another task runs, 400 without a prompt. |
+| `POST /task` `{"prompt": "..."}` | Runs Codex in `/home/agent/work` and returns when it ends, 200 (a failed task is an `error`, not an HTTP error). 409 while another task runs, 400 without a prompt. |
 
-`thread` is optional: any non-empty string the caller chooses, such as an
-email thread's id. The first task of a thread starts a Codex session (`codex
-exec`) and the supervisor records its id for the thread in
-`/home/agent/threads.json`, even if the task fails; later tasks of the thread
-continue it (`codex exec resume <session>`), so Codex sees the earlier
-prompts, answers and commands. A task without `thread` starts a session of
-its own. The task's response:
+One actor is one agent session, e.g. one email conversation: a new
+conversation gets a new actor. The actor's first task starts a Codex session
+(`codex exec`) and the supervisor records its id in
+`/home/agent/codex-session`, even if the task fails; every later task
+continues it (`codex exec resume <session>`), so Codex sees the earlier
+prompts, answers and commands. The task's response:
 
 | Field | Value |
 | ----- | ----- |
-| `thread` | The request's `thread`, or `null` |
-| `session` | Codex's session id (`thread_id` of its `thread.started` event), `null` if Codex started none |
+| `session` | Codex's session id (`thread_id` of its `thread.started` event), `null` if there is none yet |
 | `error` | `null` on success; `needs_login` (ChatGPT mode, not logged in: Codex did not run), `timeout` (killed after `AGENT_TASK_TIMEOUT`), `codex_failed` (Codex exited nonzero) |
 | `exit_code` | Codex's exit status (negative: killed by that signal), `null` if it did not run |
 | `message` | Why it failed: Codex's `turn.failed` message, else its stderr; e.g. `unexpected status 401 Unauthorized: ...` from the API |
 | `final_message` | Codex's last message, the answer |
 | `stderr_tail` | The end of Codex's stderr |
 
-A thread whose session Codex no longer has (its home was lost) fails with
-`codex_failed` and `no rollout found for thread id ...`.
+If Codex no longer has the recorded session (its rollout under
+`/home/agent/.codex/sessions` is gone), every task fails with `codex_failed`
+and `no rollout found for thread id ...`; the supervisor does not silently
+start a new one.
 
 Codex runs with `--dangerously-bypass-approvals-and-sandbox` (no approval
 prompts, no Codex sandbox: the actor's gVisor sandbox is the boundary;
@@ -225,8 +225,8 @@ Through `kubectl ate proxy actor <actor> 8000:8080 -a <atespace>`:
 ```sh
 curl -s localhost:8000/login             # mode; in ChatGPT mode "logged_in"
 curl -s -X POST localhost:8000/login     # ChatGPT mode: open verification_url, enter user_code
-curl -s -X POST localhost:8000/task -d '{"prompt": "Say hello", "thread": "t1"}'
-curl -s -X POST localhost:8000/task -d '{"prompt": "What did I ask?", "thread": "t1"}'
+curl -s -X POST localhost:8000/task -d '{"prompt": "Say hello"}'
+curl -s -X POST localhost:8000/task -d '{"prompt": "What did I ask?"}'
 ```
 
 ## Published images
