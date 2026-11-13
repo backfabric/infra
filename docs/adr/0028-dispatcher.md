@@ -1,0 +1,39 @@
+# The dispatcher: one A2A front door for agent tasks
+
+Every task for an agent enters through one service, the dispatcher: a Go service in the top-level directory `dispatcher/` ([a2a-go](https://github.com/a2aproject/a2a-go) v2, the Hatchet Go SDK, Substrate's Go `ateapi` client), running in the cluster in its own namespace under Pod Security `restricted`, with its image pinned by digest and its database `dispatcher` from `backfabric.postgres.databases` (ADR 0025; it retries connecting at startup). [A2A](https://a2a-protocol.org/) (spec v1.0) is the only protocol: channel adapters, humans and agents call the dispatcher, and the dispatcher calls the agents, which run as Substrate actors (ADR 0023), one actor per agent session (an A2A `contextId`). No caller reaches an actor directly, and the dispatcher has no public ingress. The first version:
+
+- **A2A server per agent**: each agent has its own agent card and endpoint with `message/send`, `tasks/get`, `tasks/cancel` and the push notification config methods. No streaming yet.
+- **Authentication**: every request carries a JWT, verified in the process (signature, issuer, audience `dispatcher`, expiry) against a configured list of trusted issuers: now Kubernetes service account tokens (the cluster's issuer), later Substrate's actor JWTs (agents tasking agents) and an OIDC identity provider for humans. Nothing else authenticates.
+- **Authorization**, deny by default: which caller may send to which agent, and on whose behalf. Every message is stored with its provenance: the authenticated caller, the principal it acts for, the channel. The rules come from static configuration now; signed agent grants (#72) replace that source later, in the same place.
+- **Durable intake**: a message is answered only after it and its task are committed in Postgres. `messageId` makes intake idempotent: the same caller sending the same `messageId` again gets the existing task, not a second turn.
+- **Queue** in Hatchet (ADR 0027): one turn per `contextId` at a time, in order, and a global cap on running turns. Hatchet holds ids only; tasks still in `submitted` that Hatchet does not hold are enqueued again, and a turn checks the record before it runs, so a duplicate finds its work done.
+- **A turn** sends the new message to the session's actor through atenet-router, with mutual TLS (the dispatcher pod's Substrate pod certificate) and the header `ate-target-actor`; the router resumes a suspended actor. It waits asynchronously for the actor's task to finish, writing every status and artifact into the record. A deadline per agent bounds it; transient failures (router, resume, 5xx) are retried with backoff and the same `messageId`. When the actor is lost (crashed, deleted, or its snapshot unusable), the dispatcher creates a new actor from the agent's profile and sends the thread's history from its record with the message.
+- **Delivery** by `tasks/get` from the record, and by push notifications, retried with backoff until acknowledged or expired.
+- **Cancellation**: `tasks/cancel` drops a queued turn and cancels a running one at the actor.
+- **Audit**: one event per decision and transition (accepted, refused, queued, started, retried, actor created, finished, cancelled, delivered), with ids, identities and provenance, to the OTel Collector (ADR 0021), as a trusted source with its own service account. Message contents stay in Postgres.
+
+State model A: the dispatcher's database holds the canonical record of every A2A message, task, status and artifact, of every caller and agent. An actor's working state (its Codex session and files) is a cache of that thread, and Substrate's snapshot of the actor is its exact copy. A turn sends only the new message; the full history is sent only to a new actor that replaces a lost one. Hatchet holds ids, never contents.
+
+Agents are at first a static list in the private repository: name, profile (actor template, egress policy, agent card, limits), and the actors of its sessions; signed grants (#72) come later in the same place. The operator is an ordinary caller: a token of the service account `operator` (`kubectl create token operator --audience dispatcher`) through `kubectl port-forward`.
+
+## Considered Options
+
+- [kagent](https://kagent.dev/): runs agents as its own Deployments with its own runtime and model configuration, not as Substrate actors running Codex; we would bypass most of it and still need the record and the queue.
+- [agentgateway](https://agentgateway.dev/) in front, for authentication and routing: deferred. It can be put in front later without changing callers (same A2A endpoints and tokens) or agents.
+- Restate, Temporal or DBOS for durable execution: Temporal is a cluster of its own services; Restate's server is under the BSL; DBOS runs in the process on Postgres, but its Go SDK is young. The queue itself is ADR 0027.
+- A queue on Postgres only (our own `SKIP LOCKED` table, or River): per-key concurrency, retries, cancellation and a dashboard would be ours to write, or are in River's paid edition.
+- Python (the reference A2A SDK): Hatchet and Substrate's client are Go, as is Substrate; Go gives one static binary in a small image.
+- One actor per agent instead of per session: all threads of an agent would share one Codex session and work directory, and run one at a time.
+- State model B, everything only in the actor (its snapshots), the dispatcher only routing and keeping metadata: a lost snapshot loses the conversation, the audit relies on the untrusted sandbox, and the agent's implementation cannot be swapped.
+- State model C, stateless agents with the full history sent every turn: costly on long threads, and Codex loses its own tool calls between turns.
+- State model D, the agent checkpoints its own state to an external store (LangGraph checkpointers, Letta): every agent implementation must support it, one more service, and not an audit record.
+- State model E, state held by the model provider (the Responses API's `previous_response_id`): provider lock-in, conversations stored by the provider, and lost on a change of model or provider.
+
+## Consequences
+
+- Amends ADR 0022 (and with it ADR 0015): CI builds and publishes a second image, `ghcr.io/backfabric/dispatcher`, from Nix, as it does the agent image: on pull requests built and not pushed, on main pushed with the commit SHA and a provenance attestation, made public once by hand.
+- Depends on Substrate (ADR 0023), the platform PostgreSQL (ADR 0025) and Hatchet (ADR 0027; the dispatcher's namespace is one of Hatchet's client namespaces). Substrate's router must admit the dispatcher's identity (today only `kubectl ate proxy`'s), and the dispatcher needs Substrate rights to create, suspend and delete actors and their egress policies in the agents' atespaces.
+- One actor per session means one Codex device-auth login per session. A session whose actor is not logged in answers `auth-required`. The first deployment has one agent with one session, one long-lived actor logged in once by the operator (as agent-0, docs/substrate.md). Many sessions per agent on a subscription need either a credential provider that holds the tokens (to be researched) or an API key; that is open, not solved here.
+- Our code is the A2A front door, authorization, the record and its idempotency, the turn's lifecycle and recovery, and push delivery; protocol, queue, runtime and storage are upstream's (a2a-go, Hatchet, Substrate, CloudNativePG).
+- A bug in the dispatcher can send any agent anything any caller may send it: until grants (#72), the static configuration and the audit are the only checks.
+- The dispatcher's database is the platform's conversation history: losing `/var/lib/postgres-platform` loses it (no backups yet, ADR 0025); actors keep only their own threads.
