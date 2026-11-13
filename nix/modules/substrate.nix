@@ -722,6 +722,39 @@ in
         images = [ images.worker ];
       });
 
+      # Declared as they are created today; the generated default-deny
+      # replaces upstream's and the consumer's in this module's own change
+      # (ADR 0029).
+      backfabric.k3s.namespaces = {
+        ${namespace} = {
+          createdBy = "ate-setup";
+          networkPolicies = "unmanaged";
+          reason = "`ate-setup deploy ate-system` creates it (and this module's k3s manifest `substrate-rustfs`, so that RustFS need not wait), with upstream's NetworkPolicies (ate-system-networkpolicies.yaml: ingress denied by default) plus RustFS's; egress is open. Not yet moved to the generated default-deny (ADR 0029).";
+        };
+        podcertificate-controller-system = {
+          createdBy = "ate-setup";
+          networkPolicies = "unmanaged";
+          reason = "`ate-setup` creates it for the pod certificate controller, whose traffic upstream defines; no NetworkPolicies are generated yet (ADR 0029).";
+        };
+      }
+      # The consumer's namespaces (docs/substrate.md); a host's own
+      # declaration overrides these defaults.
+      // lib.genAttrs cfg.workerPoolNamespaces (
+        _:
+        lib.mapAttrs (_: lib.mkDefault) {
+          createdBy = "the host's private repository (kubectl)";
+          networkPolicies = "unmanaged";
+          reason = "A namespace of backfabric.substrate.workerPoolNamespaces, created and given its policies by the consumer (docs/substrate.md); not declared by the host.";
+        }
+      )
+      // lib.optionalAttrs cfg.smokeTest.enable {
+        ${smokeNamespace} = {
+          createdBy = "the operator (kubectl apply -f /etc/substrate/smoke/workerpool.yaml)";
+          networkPolicies = "unmanaged";
+          reason = "The smoke test's WorkerPool namespace, created and deleted by hand with its manifest (docs/substrate.md); open while it runs.";
+        };
+      };
+
       systemd.tmpfiles.settings."10-backfabric-substrate" = {
         ${dataDir}.d = {
           mode = "0755";

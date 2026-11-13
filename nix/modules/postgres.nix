@@ -379,6 +379,32 @@ in
         }
       ];
 
+      # Declared as they are created today; the generated Namespaces and
+      # default-deny replace this module's own in its own change (ADR 0029).
+      backfabric.k3s.namespaces = {
+        ${namespace} = {
+          createdBy = "the k3s manifest `postgres` of the postgres module";
+          networkPolicies = "unmanaged";
+          reason = "Created with the Cluster in the module's own manifest, whose NetworkPolicies deny ingress except from the operator and the namespaces of `databases`; egress is open. Not yet moved to the generated Namespace and default-deny (ADR 0029).";
+        };
+        ${operatorNamespace} = {
+          createdBy = "CloudNativePG's release manifest (the k3s manifest `postgres-operator`)";
+          networkPolicies = "unmanaged";
+          reason = "Created by the upstream operator manifest; the module's NetworkPolicy admits ingress only to the webhook, egress is open. Not yet moved to the generated default-deny (ADR 0029).";
+        };
+      }
+      # A service's namespace is the host's to declare; until it does, the
+      # namespace is declared as postgres-credentials creates it (a host's
+      # own declaration overrides these defaults: write `createdBy = "nix";`).
+      // lib.genAttrs clientNamespaces (
+        _:
+        lib.mapAttrs (_: lib.mkDefault) {
+          createdBy = "postgres-credentials";
+          networkPolicies = "unmanaged";
+          reason = "The namespace of a service in backfabric.postgres.databases, created by postgres-credentials if missing; not declared by the host.";
+        }
+      );
+
       services.k3s.manifests = k3sManifests;
 
       systemd.tmpfiles.settings."10-backfabric-postgres".${dataDir}.d = {

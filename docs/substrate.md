@@ -150,7 +150,8 @@ kubectl delete -f /etc/substrate/smoke/workerpool.yaml
 Worker pods run as root with a host path, SYS_ADMIN, NET_ADMIN and seven
 more capabilities, seccomp and AppArmor Unconfined, so their namespace must
 be exempt from Pod Security. List it in
-`backfabric.substrate.workerPoolNamespaces`: it is exempt, and its pods may
+`backfabric.substrate.workerPoolNamespaces`: it is declared (the API
+server admits creating it, ADR 0029) and exempt, and its pods may
 only run the release's gVisor worker image,
 `ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0@sha256:f8987236c6256f58c4b2625e543b43f4ae4bdded6ee6821c03d966effb7c0f17`
 (as `workerImage` of every WorkerPool there). The actors' images run inside

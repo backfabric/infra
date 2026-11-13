@@ -133,6 +133,15 @@ nix flake init -t github:backfabric/infra
   rejected. Deviations from the guide:
   [ADR 0017](docs/adr/0017-cluster-hardening-defaults.md). Run `kubectl` on
   the host as root (`ssh <host>`, then `kubectl get nodes`).
+  Every namespace is declared in `backfabric.k3s.namespaces`
+  ([ADR 0029](docs/adr/0029-declared-namespaces-closed-by-default.md)):
+  the API server rejects creating any other. Each is created by Nix and
+  closed (a generated default-deny for ingress and egress, DNS to CoreDNS
+  allowed, plus its declared `ingress` and `egress` rules) unless declared
+  as an exception with a reason: k3s's own (kube-system unmanaged;
+  `default`, `kube-public`, `kube-node-lease` closed) and, until each
+  module moves to the mechanism, those the modules and installers create
+  themselves.
   `backfabric.k3s.package` (default `pkgs.k3s_1_36`, the newest minor
   version of the NixOS stable release) pins the k3s minor version: upgrade
   one minor version at a time, with `switch`, never `test` (see the
