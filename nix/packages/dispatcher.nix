@@ -17,7 +17,13 @@ buildGo127Module {
     fileset = ../../dispatcher;
   };
   vendorHash = "sha256-tBiZlsVDiq002qVyOMU+0wxtBoVDeXnxwJPhm8Yg19I=";
-  env.CGO_ENABLED = "0";
+  env = {
+    CGO_ENABLED = "0";
+  }
+  // lib.optionalAttrs stdenv.hostPlatform.isLinux {
+    # Where the hook runs, a test that cannot reach it fails, not skips.
+    DISPATCHER_TEST_DATABASE = "required";
+  };
   ldflags = [ "-s" ];
 
   # The tests that need the record run against a real PostgreSQL, the

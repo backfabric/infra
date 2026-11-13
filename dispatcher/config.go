@@ -26,6 +26,18 @@ type Config struct {
 	Audit Audit `json:"audit"`
 	// Agents by name: each gets an A2A endpoint and agent card.
 	Agents map[string]Agent `json:"agents"`
+	// MaxRequestBytes bounds a request's body (default 1 MiB): a2a-go
+	// decodes it whole before the caller is authenticated.
+	MaxRequestBytes int64 `json:"maxRequestBytes,omitempty"`
+}
+
+const defaultMaxRequestBytes = 1 << 20
+
+func (c *Config) maxRequestBytes() int64 {
+	if c.MaxRequestBytes == 0 {
+		return defaultMaxRequestBytes
+	}
+	return c.MaxRequestBytes
 }
 
 // Issuer is a trusted issuer of JWTs.
@@ -103,6 +115,9 @@ func (c *Config) validate() error {
 	}
 	if u, err := url.Parse(c.URL); err != nil || u.Scheme == "" || u.Host == "" {
 		errs = append(errs, fmt.Errorf("url: not an absolute URL: %q", c.URL))
+	}
+	if c.MaxRequestBytes < 0 {
+		errs = append(errs, errors.New("maxRequestBytes: must not be negative"))
 	}
 	if len(c.Issuers) == 0 {
 		errs = append(errs, errors.New("issuers: at least one required"))

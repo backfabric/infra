@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/jackc/pgx/v5"
@@ -192,5 +193,61 @@ func TestCancel(t *testing.T) {
 		if _, err := s.Cancel(ctx, "codex", alice.Caller, task.ID); !errors.Is(err, a2a.ErrTaskNotCancelable) {
 			t.Errorf("cancel a canceled task: %v, want not cancelable", err)
 		}
+	}
+}
+
+// Concurrent copies of a message continuing a waiting task: the first
+// continues it, the others find that message's task, none is refused
+// because the task has moved on. The copies are held at the task's row
+// lock until all of them wait there.
+func TestContinueTaskRaces(t *testing.T) {
+	s, ctx := testStore(t), context.Background()
+	alice := newCaller()
+	task, _, err := s.Submit(ctx, "codex", userMessage("r1", "", ""), alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setState(t, s, task.ID, a2a.TaskStateAuthRequired)
+
+	// A connection of its own, outside the store's pool.
+	conn, err := pgx.Connect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	holder, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM tasks WHERE id = $1 FOR UPDATE`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	const copies = 3 // within the pool's smallest size, 4
+	var wg sync.WaitGroup
+	for i := range copies {
+		wg.Go(func() {
+			got, _, err := s.Submit(ctx, "codex", userMessage("r2", "", task.ID), alice)
+			if err != nil || got.ID != task.ID {
+				t.Errorf("continuation %d: task %v, error %v; want %s", i, got, err, task.ID)
+			}
+		})
+	}
+	for waiting := 0; waiting < copies; time.Sleep(10 * time.Millisecond) {
+		// Within the holder's transaction, pg_stat_activity is a snapshot
+		// until cleared.
+		if err := holder.QueryRow(ctx, `
+			SELECT count(*) FROM pg_stat_activity, pg_stat_clear_snapshot()
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+
+	got, err := s.Task(ctx, "codex", alice.Caller, task.ID, nil)
+	if err != nil || len(got.History) != 2 {
+		t.Errorf("continued task: %v, %v; want two messages", got, err)
 	}
 }

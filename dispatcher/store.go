@@ -118,6 +118,26 @@ func (s *Store) Submit(ctx context.Context, agent string, msg *a2a.Message, p Pr
 }
 
 func submit(ctx context.Context, tx pgx.Tx, agent string, msg *a2a.Message, p Provenance) (a2a.TaskID, bool, error) {
+	// A message continuing a task first locks the task: a concurrent copy
+	// of the message waits here, and then finds the first copy recorded
+	// instead of the task's new state.
+	var (
+		owner     taskOwner
+		state     a2a.TaskState
+		taskFound bool
+	)
+	if msg.TaskID != "" {
+		err := tx.QueryRow(ctx, `
+			SELECT t.context_id, t.state, c.agent, c.caller_issuer, c.caller_subject
+			FROM tasks t JOIN contexts c ON c.id = t.context_id
+			WHERE t.id = $1 FOR UPDATE OF t`, msg.TaskID).
+			Scan(&owner.contextID, &state, &owner.agent, &owner.caller.Issuer, &owner.caller.Subject)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", false, err
+		}
+		taskFound = err == nil
+	}
+
 	var (
 		taskID    a2a.TaskID
 		taskAgent string
@@ -139,18 +159,8 @@ func submit(ctx context.Context, tx pgx.Tx, agent string, msg *a2a.Message, p Pr
 	contextID := msg.ContextID
 	if msg.TaskID != "" {
 		taskID = msg.TaskID
-		var state a2a.TaskState
-		var owner taskOwner
-		err := tx.QueryRow(ctx, `
-			SELECT t.context_id, t.state, c.agent, c.caller_issuer, c.caller_subject
-			FROM tasks t JOIN contexts c ON c.id = t.context_id
-			WHERE t.id = $1 FOR UPDATE OF t`, taskID).
-			Scan(&owner.contextID, &state, &owner.agent, &owner.caller.Issuer, &owner.caller.Subject)
-		if errors.Is(err, pgx.ErrNoRows) || err == nil && !owner.is(agent, p.Caller) {
+		if !taskFound || !owner.is(agent, p.Caller) {
 			return "", false, fmt.Errorf("%w: %s", a2a.ErrTaskNotFound, taskID)
-		}
-		if err != nil {
-			return "", false, err
 		}
 		if contextID != "" && contextID != owner.contextID {
 			return "", false, fmt.Errorf("%w: task %s belongs to context %s", a2a.ErrInvalidParams, taskID, owner.contextID)

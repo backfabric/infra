@@ -16,7 +16,7 @@ of `SendMessage` come with it.
 | ---- | ---- |
 | `GET /agents/<agent>/.well-known/agent-card.json` | the agent's card, unauthenticated |
 | `POST /agents/<agent>/` | A2A 1.0, JSON-RPC binding; the header `A2A-Version: 1.0` is required |
-| `GET /healthz` | 200 when the database answers, else 503 |
+| `GET /healthz` | 200 when the database answers, else 503 (the reason in the log only) |
 
 Methods: `SendMessage`, `GetTask`, `CancelTask`. Streaming and `ListTasks`
 answer `UnsupportedOperationError`, the push notification methods
@@ -69,8 +69,14 @@ acts for, and the channel, from the `SendMessage` request's `metadata`:
 | `backfabric.io/principal` | whom the caller acts for: one of its configured `principals`, else `UnauthorizedError`; without it, the caller itself |
 | `backfabric.io/channel` | the channel the message came through, recorded as stated |
 
-The dispatcher's own failures (the database) are logged and answered with
+The caller learns only the kind of a refusal: authentication and
+authorization errors carry no reason (the reason is in the audit). The
+dispatcher's own failures (the database) are logged and answered with
 `InternalError`, without details.
+
+The server reads a request within 30 seconds (headers within 10), writes
+its answer within a minute, and closes idle connections after two
+minutes.
 
 ## Configuration
 
@@ -112,6 +118,7 @@ by the NixOS module that deploys the dispatcher. Unknown fields are errors.
 | Field | Required | Meaning |
 | ----- | -------- | ------- |
 | `listen` | yes | the server's address |
+| `maxRequestBytes` | no | the largest request body, default 1048576 (1 MiB); a larger one is refused before it is read whole, since a2a-go decodes a request before it is authenticated |
 | `url` | yes | the base URL callers use; cards advertise `<url>/agents/<agent>/` |
 | `issuers.<name>.issuer` | yes | the exact `iss` claim |
 | `issuers.<name>.audience` | yes | the `aud` a token must carry |
@@ -126,7 +133,13 @@ by the NixOS module that deploys the dispatcher. Unknown fields are errors.
 
 The issuer's keys are fetched from `jwksURL` rather than through discovery
 in the cluster: the discovery document of Kubernetes names its JWKS by the
-API server's external address.
+API server's external address. Fetches time out after 10 seconds and do
+not follow redirects (the token goes to the configured URL only).
+
+Callers are keyed by the issuer's *name* in `issuers`, not by its `iss`:
+renaming an entry makes its callers new callers, whose earlier contexts
+and tasks they no longer see and whose `messageId`s are new again. Rename
+only together with the record.
 
 ## Environment
 
@@ -145,7 +158,12 @@ CloudNativePG renews its CA, restart it.
 
 One event per decision, as an OpenTelemetry log event (and a log line):
 `dispatcher.accepted` (also for a duplicate, with `dispatcher.duplicate`),
-`dispatcher.refused` (with `dispatcher.reason`), `dispatcher.cancelled`.
+`dispatcher.cancelled`, and `dispatcher.refused` with `dispatcher.reason`
+for every refused call: unauthenticated, not a caller, a principal the
+caller may not act for, an invalid or conflicting message, a task that is
+not the caller's or cannot be cancelled, an unsupported method. Only a
+request without `A2A-Version: 1.0` is refused before it reaches the
+dispatcher's code (by a2a-go), without an event.
 Attributes: `dispatcher.agent`, `dispatcher.method`, `a2a.task_id`,
 `a2a.context_id`, `a2a.message_id`, `dispatcher.caller.issuer`,
 `dispatcher.caller.subject`, `dispatcher.principal`, `dispatcher.channel`.
@@ -171,9 +189,10 @@ nix build .#packages.x86_64-linux.dispatcher-image   # on Linux; CI builds it
 ```
 
 The tests that need the record run against a real PostgreSQL: the Nix
-build on Linux starts one (nixpkgs' `postgresqlTestHook`); elsewhere they
-run when `PGHOST` (and the other libpq variables) point at an empty
-database, and are skipped otherwise:
+build on Linux starts one (nixpkgs' `postgresqlTestHook`) and sets
+`DISPATCHER_TEST_DATABASE=required`, so they fail rather than skip without
+it; elsewhere they run when `PGHOST` (and the other libpq variables) point
+at an empty database, and are skipped otherwise:
 
 ```sh
 cd dispatcher

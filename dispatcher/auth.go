@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 )
@@ -135,7 +136,14 @@ func issuerClient(iss Issuer) (*http.Client, error) {
 	if iss.TokenFile != "" {
 		rt = &bearerTransport{base: transport, tokenFile: iss.TokenFile}
 	}
-	return &http.Client{Transport: rt}, nil
+	return &http.Client{
+		Transport: rt,
+		// go-oidc refreshes keys one fetch at a time: a hung fetch would
+		// hold back every later one.
+		Timeout: 10 * time.Second,
+		// The token goes to the configured URL only, never to a redirect.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}, nil
 }
 
 func loadCAs(path string) (*x509.CertPool, error) {

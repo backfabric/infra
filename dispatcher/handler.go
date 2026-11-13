@@ -23,7 +23,7 @@ func NewServer(cfg *Config, auth *Authenticator, store *Store, audit *Auditor) (
 			return nil, fmt.Errorf("agent %s: %w", name, err)
 		}
 		handler := &a2asrv.InterceptedHandler{
-			Handler: &agentHandler{name: name, store: store, audit: audit},
+			Handler: &agentHandler{name: name, store: store},
 			Interceptors: []a2asrv.CallInterceptor{
 				&gate{agentName: name, agent: agent, auth: auth, audit: audit},
 				enforcer,
@@ -33,15 +33,19 @@ func NewServer(cfg *Config, auth *Authenticator, store *Store, audit *Auditor) (
 		mux.Handle("GET "+prefix+a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(card))
 		mux.Handle("POST "+prefix+"/", a2asrv.NewJSONRPCHandler(handler))
 	}
-	// Liveness and readiness: the record answers.
+	// Liveness and readiness: the record answers. The reason is logged, not
+	// shown: the endpoint is unauthenticated.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := store.Ping(r.Context()); err != nil {
-			http.Error(w, "database: "+err.Error(), http.StatusServiceUnavailable)
+			slog.ErrorContext(r.Context(), "health check: database not reachable", "error", err)
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		fmt.Fprintln(w, "ok")
 	})
-	return mux, nil
+	// A2A requests are decoded whole before they are authenticated: their
+	// size is bounded first.
+	return http.MaxBytesHandler(mux, cfg.maxRequestBytes()), nil
 }
 
 const securityScheme a2a.SecuritySchemeName = "bearer"
@@ -75,51 +79,24 @@ func agentCard(cfg *Config, name string, agent Agent) *a2a.AgentCard {
 	}
 }
 
-type callerKey struct{}
-
-type authorizedCaller struct {
-	id     Identity
-	caller *Caller
+// call is one authorized call as the audit records it; the gate starts it
+// from the request, the handlers add what they decide.
+type call struct {
+	id        Identity
+	caller    *Caller
+	method    string
+	taskID    string
+	contextID string
+	messageID string
+	principal string
+	channel   string
+	duplicate bool
 }
 
-// gate authenticates every call and admits only the agent's callers.
-type gate struct {
-	agentName string
-	agent     Agent
-	auth      *Authenticator
-	audit     *Auditor
-}
+type callKey struct{}
 
-func (g *gate) Before(ctx context.Context, callCtx *a2asrv.CallContext, req *a2asrv.Request) (context.Context, any, error) {
-	refuse := func(id *Identity, err error) (context.Context, any, error) {
-		g.audit.Emit(ctx, AuditEvent{Name: eventRefused, Agent: g.agentName, Method: callCtx.Method(), Caller: id, Reason: err.Error()})
-		return ctx, nil, err
-	}
-	header, _ := callCtx.ServiceParams().Get("Authorization")
-	id, err := g.auth.Verify(ctx, bearerToken(header))
-	if err != nil {
-		return refuse(nil, fmt.Errorf("%w: %v", a2a.ErrUnauthenticated, err))
-	}
-	caller, ok := g.agent.Caller(id)
-	if !ok {
-		return refuse(&id, fmt.Errorf("%w: %s may not call agent %s", a2a.ErrUnauthorized, id, g.agentName))
-	}
-	callCtx.User = a2asrv.NewAuthenticatedUser(id.String(), nil)
-	return context.WithValue(ctx, callerKey{}, authorizedCaller{id: id, caller: caller}), nil, nil
-}
-
-// After keeps the dispatcher's own failures (the database's errors) from
-// the caller: they are logged, and the caller gets an internal error.
-func (g *gate) After(ctx context.Context, callCtx *a2asrv.CallContext, resp *a2asrv.Response) error {
-	if resp.Err != nil && !isA2AError(resp.Err) {
-		slog.ErrorContext(ctx, "call failed", "agent", g.agentName, "method", callCtx.Method(), "error", resp.Err)
-		resp.Err = a2a.ErrInternalError
-	}
-	return nil
-}
-
-func callerFrom(ctx context.Context) authorizedCaller {
-	c, ok := ctx.Value(callerKey{}).(authorizedCaller)
+func callFrom(ctx context.Context) *call {
+	c, ok := ctx.Value(callKey{}).(*call)
 	if !ok {
 		// Every call passes the gate first.
 		panic("call without an authorized caller")
@@ -127,11 +104,88 @@ func callerFrom(ctx context.Context) authorizedCaller {
 	return c
 }
 
+// gate authenticates every call, admits only the agent's callers, and
+// audits every call's outcome.
+type gate struct {
+	agentName string
+	agent     Agent
+	auth      *Authenticator
+	audit     *Auditor
+}
+
+// Before refuses a call without a valid token or from anyone but the
+// agent's callers. The caller learns only that; the reason goes into the
+// audit.
+func (g *gate) Before(ctx context.Context, callCtx *a2asrv.CallContext, req *a2asrv.Request) (context.Context, any, error) {
+	c := &call{method: callCtx.Method()}
+	switch p := req.Payload.(type) {
+	case *a2a.SendMessageRequest:
+		if p.Message != nil {
+			c.messageID, c.taskID, c.contextID = p.Message.ID, string(p.Message.TaskID), p.Message.ContextID
+		}
+	case *a2a.GetTaskRequest:
+		c.taskID = string(p.ID)
+	case *a2a.CancelTaskRequest:
+		c.taskID = string(p.ID)
+	}
+	header, _ := callCtx.ServiceParams().Get("Authorization")
+	id, err := g.auth.Verify(ctx, bearerToken(header))
+	if err != nil {
+		g.emit(ctx, eventRefused, c, "unauthenticated: "+err.Error())
+		return ctx, nil, a2a.ErrUnauthenticated
+	}
+	c.id = id
+	if c.caller, _ = g.agent.Caller(id); c.caller == nil {
+		g.emit(ctx, eventRefused, c, "not a caller of the agent")
+		return ctx, nil, a2a.ErrUnauthorized
+	}
+	callCtx.User = a2asrv.NewAuthenticatedUser(id.String(), nil)
+	return context.WithValue(ctx, callKey{}, c), nil, nil
+}
+
+// After audits the outcome of an authorized call: a refusal (an A2A error,
+// also from the card enforcer) or the decision. It keeps the dispatcher's
+// own failures (the database's errors) from the caller: they are logged,
+// and the caller gets an internal error.
+func (g *gate) After(ctx context.Context, callCtx *a2asrv.CallContext, resp *a2asrv.Response) error {
+	c, authorized := ctx.Value(callKey{}).(*call)
+	switch {
+	case resp.Err != nil && !isA2AError(resp.Err):
+		slog.ErrorContext(ctx, "call failed", "agent", g.agentName, "method", callCtx.Method(), "error", resp.Err)
+		resp.Err = a2a.ErrInternalError
+	case !authorized:
+		// Refused by Before, which audited it.
+	case resp.Err != nil:
+		g.emit(ctx, eventRefused, c, resp.Err.Error())
+	default:
+		if task, ok := resp.Payload.(*a2a.Task); ok {
+			c.taskID, c.contextID = string(task.ID), task.ContextID
+		}
+		switch c.method {
+		case "SendMessage":
+			g.emit(ctx, eventAccepted, c, "")
+		case "CancelTask":
+			g.emit(ctx, eventCancelled, c, "")
+		}
+	}
+	return nil
+}
+
+func (g *gate) emit(ctx context.Context, name string, c *call, reason string) {
+	e := AuditEvent{
+		Name: name, Agent: g.agentName, Method: c.method, TaskID: c.taskID, ContextID: c.contextID, MessageID: c.messageID,
+		Principal: c.principal, Channel: c.channel, Duplicate: c.duplicate, Reason: reason,
+	}
+	if c.id != (Identity{}) {
+		e.Caller = &c.id
+	}
+	g.audit.Emit(ctx, e)
+}
+
 // agentHandler serves one agent's A2A methods from the record.
 type agentHandler struct {
 	name  string
 	store *Store
-	audit *Auditor
 }
 
 var _ a2asrv.RequestHandler = (*agentHandler)(nil)
@@ -139,7 +193,7 @@ var _ a2asrv.RequestHandler = (*agentHandler)(nil)
 // SendMessage records the message and its task and answers with the task,
 // in state submitted, once both are committed.
 func (h *agentHandler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
-	c := callerFrom(ctx)
+	c := callFrom(ctx)
 	msg := req.Message
 	if msg == nil || msg.ID == "" || len(msg.Parts) == 0 {
 		return nil, fmt.Errorf("%w: a message with messageId and parts is required", a2a.ErrInvalidParams)
@@ -152,20 +206,14 @@ func (h *agentHandler) SendMessage(ctx context.Context, req *a2a.SendMessageRequ
 	}
 	prov, err := c.caller.Provenance(c.id, req.Metadata)
 	if err != nil {
-		h.audit.Emit(ctx, AuditEvent{Name: eventRefused, Agent: h.name, Method: "SendMessage", Caller: &c.id, MessageID: msg.ID, Reason: err.Error()})
 		return nil, err
 	}
+	c.principal, c.channel = prov.Principal, prov.Channel
 	task, duplicate, err := h.store.Submit(ctx, h.name, msg, prov)
 	if err != nil {
-		if isA2AError(err) {
-			h.audit.Emit(ctx, AuditEvent{Name: eventRefused, Agent: h.name, Method: "SendMessage", Caller: &c.id, MessageID: msg.ID, Principal: prov.Principal, Channel: prov.Channel, Reason: err.Error()})
-		}
 		return nil, err
 	}
-	h.audit.Emit(ctx, AuditEvent{
-		Name: eventAccepted, Agent: h.name, TaskID: string(task.ID), ContextID: task.ContextID, MessageID: msg.ID,
-		Caller: &c.id, Principal: prov.Principal, Channel: prov.Channel, Duplicate: duplicate,
-	})
+	c.duplicate = duplicate
 	if req.Config != nil && req.Config.HistoryLength != nil {
 		task.History = lastMessages(task.History, *req.Config.HistoryLength)
 	}
@@ -173,18 +221,12 @@ func (h *agentHandler) SendMessage(ctx context.Context, req *a2a.SendMessageRequ
 }
 
 func (h *agentHandler) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
-	return h.store.Task(ctx, h.name, callerFrom(ctx).id, req.ID, req.HistoryLength)
+	return h.store.Task(ctx, h.name, callFrom(ctx).id, req.ID, req.HistoryLength)
 }
 
 // CancelTask cancels a task that has not finished.
 func (h *agentHandler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*a2a.Task, error) {
-	c := callerFrom(ctx)
-	task, err := h.store.Cancel(ctx, h.name, c.id, req.ID)
-	if err != nil {
-		return nil, err
-	}
-	h.audit.Emit(ctx, AuditEvent{Name: eventCancelled, Agent: h.name, TaskID: string(task.ID), ContextID: task.ContextID, Caller: &c.id})
-	return task, nil
+	return h.store.Cancel(ctx, h.name, callFrom(ctx).id, req.ID)
 }
 
 func (h *agentHandler) ListTasks(context.Context, *a2a.ListTasksRequest) (*a2a.ListTasksResponse, error) {

@@ -23,12 +23,16 @@ var (
 )
 
 // testStore is the record in a real PostgreSQL, from the libpq environment.
-// The Nix build starts one (postgresqlTestHook); elsewhere, without
-// PGHOST, the tests that need it are skipped.
+// The Nix build on Linux starts one (postgresqlTestHook) and sets
+// DISPATCHER_TEST_DATABASE=required; elsewhere, without PGHOST, the tests
+// that need it are skipped.
 func testStore(t *testing.T) *Store {
 	t.Helper()
 	if os.Getenv("PGHOST") == "" {
-		t.Skip("no PostgreSQL: PGHOST is not set (nix build runs one)")
+		if os.Getenv("DISPATCHER_TEST_DATABASE") == "required" {
+			t.Fatal("no PostgreSQL: PGHOST is not set")
+		}
+		t.Skip("no PostgreSQL: PGHOST is not set (nix build runs one on Linux)")
 	}
 	storeOnce.Do(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

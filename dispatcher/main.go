@@ -57,7 +57,19 @@ func run(configPath string) error {
 		return err
 	}
 
-	server := &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{
+		Addr:    cfg.Listen,
+		Handler: handler,
+		// A request (at most maxRequestBytes) is read within these, so a
+		// slow or idle peer cannot hold connections.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		// Every call answers from the record within this. A call that
+		// waits longer (blocking SendMessage, later) extends its own
+		// deadline with http.ResponseController.SetWriteDeadline.
+		WriteTimeout: time.Minute,
+	}
 	served := make(chan error, 1)
 	go func() { served <- server.ListenAndServe() }()
 	slog.Info("serving", "listen", cfg.Listen, "agents", len(cfg.Agents))
