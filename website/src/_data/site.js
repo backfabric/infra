@@ -2,6 +2,7 @@ export default {
   name: "backfabric",
   url: "https://backfabric.dev",
   repo: "https://github.com/backfabric/infra",
+  tagline: "run AI agents on servers you own",
   description:
-    "An encrypted, hardened k3s cluster on Hetzner bare metal for running AI agents, declared end to end in a public NixOS flake.",
+    "NixOS modules that turn Hetzner bare metal into an encrypted, locked-down k3s cluster for AI agents: sandboxed, closed to the internet, and audited.",
 };
