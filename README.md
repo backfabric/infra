@@ -50,7 +50,8 @@ requires them there for the flake to be `github:backfabric/infra`.
   [managing secrets](docs/secrets.md),
   [OpenBao](docs/openbao.md),
   [the audit telemetry collector](docs/otel.md),
-  [the agent image](docs/agent-image.md);
+  [the agent image](docs/agent-image.md),
+  [Agent Substrate](docs/substrate.md);
   architectural decisions in [docs/adr/](docs/adr/).
 
 ## Private repository
@@ -167,6 +168,16 @@ nix flake init -t github:backfabric/infra
   credentials, and writes everything to an append-only archive of OTLP JSON
   lines in `/var/log/otel-collector` (root only, one file per signal,
   rotated at 100 MB, kept 365 days). See [docs/otel.md](docs/otel.md).
+- `substrate` (off unless `backfabric.substrate.enable`):
+  [Agent Substrate](https://github.com/agent-substrate/substrate) v1.0.0
+  ([ADR 0023](docs/adr/0023-agent-substrate-runtime.md)), installed by its
+  own `ate-setup` from the release's images at every deployment that
+  changes it, with the beta Kubernetes features its pod certificates need,
+  gVisor sandboxes only, its bundled PostgreSQL and a RustFS S3 server for
+  snapshots in `ate-system` on static local volumes in `/var/lib/substrate`,
+  and `kubectl ate` on the host. `ate-system` and the namespaces of
+  `workerPoolNamespaces` are exempt from Pod Security; their pods may only
+  run digest-pinned images. See [docs/substrate.md](docs/substrate.md).
 
 ## Checks
 

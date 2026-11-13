@@ -59,6 +59,15 @@
     kv.secrets."example/app".password = "example-app-password";
   };
 
+  # Agent Substrate on the cluster (docs/substrate.md), its RustFS
+  # credentials from `secrets/common.yaml`: WorkerPools in the namespace
+  # `agents`, and the smoke test.
+  backfabric.substrate = {
+    enable = true;
+    workerPoolNamespaces = [ "agents" ];
+    smokeTest.enable = true;
+  };
+
   # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,
   # with the report that `backfabric probe` generates with nixos-facter. This
   # excerpt has the shape of a real report of a Hetzner server (fields the
