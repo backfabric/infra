@@ -1,0 +1,43 @@
+---
+layout: base.njk
+bodyClass: docs
+pagination:
+  data: repo.all
+  size: 1
+  alias: doc
+permalink: "{{ doc.url }}"
+eleventyComputed:
+  title: "{{ doc.title }}"
+  description: "{{ doc.summary }}"
+---
+{% set siblings = repo.adrs if doc.kind == "adr" else [repo.overview, repo.template].concat(repo.runbooks) %}
+{% set ns = { prev: null, next: null } %}
+{% for s in siblings %}{% if s.url == doc.url %}{% set ns = { prev: siblings[loop.index0 - 1] if loop.index0 > 0 else null, next: siblings[loop.index0 + 1] if not loop.last else null } %}{% endif %}{% endfor %}
+<div class="doc-layout">
+  <nav class="doc-nav" aria-label="Documentation">
+    <p class="doc-nav-head"><a href="/docs/">All docs</a></p>
+    <ul>
+      {% for s in [repo.overview, repo.template].concat(repo.runbooks) %}
+      <li><a href="{{ s.url }}"{% if s.url == doc.url %} aria-current="page"{% endif %}>{{ s.title }}</a></li>
+      {% endfor %}
+      <li><a href="/docs/#decisions"{% if doc.kind == "adr" %} aria-current="true"{% endif %}>Decision records</a></li>
+    </ul>
+  </nav>
+  <article class="doc">
+    <header class="doc-head">
+      <p class="eyebrow">{% if doc.kind == "adr" %}Decision record {{ doc.number }}{% elif doc.kind == "runbook" %}Runbook{% else %}Guide{% endif %}</p>
+      <h1>{{ doc.title }}</h1>
+      {% if doc.status %}<p><span class="status-tag">{{ doc.status }}</span></p>{% endif %}
+    </header>
+    <div class="prose">
+{{ doc.html | safe }}
+    </div>
+    <footer class="doc-foot">
+      <p><a href="{{ doc.github }}">View <code>{{ doc.source }}</code> on GitHub</a></p>
+      <nav class="pager" aria-label="Previous and next">
+        {% if ns.prev %}<a class="pager-prev" href="{{ ns.prev.url }}"><span>Previous</span>{{ ns.prev.title }}</a>{% endif %}
+        {% if ns.next %}<a class="pager-next" href="{{ ns.next.url }}"><span>Next</span>{{ ns.next.title }}</a>{% endif %}
+      </nav>
+    </footer>
+  </article>
+</div>

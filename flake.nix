@@ -144,7 +144,8 @@
       # The operator command `backfabric` on its own, for a host whose public
       # keys do not exist yet (see docs/fleet-shell.md); and the agents'
       # container image, built and published by CI only
-      # (docs/agent-image.md).
+      # (docs/agent-image.md); and the project website, published by CI to
+      # GitHub Pages (ADR 0026).
       packages = forAllSystems (
         pkgs:
         let
@@ -153,6 +154,7 @@
         {
           inherit backfabric;
           default = backfabric;
+          website = pkgs.callPackage ./nix/website.nix { };
         }
         // lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
           agent-image = pkgs.callPackage ./nix/images/agent.nix { };
