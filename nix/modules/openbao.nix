@@ -86,23 +86,9 @@ let
       BAO_TOKEN_PATH = "/run/${unit}/bao-token";
     };
 
-  # Shared by the oneshots. They wait for what they need for a bounded time
-  # and then fail, so that a deployment reports the failed unit instead of
-  # waiting for it.
+  # Shared by the oneshots, with wait_until from nix/lib/shell.nix.
   helpers = ''
-    # wait_until <seconds> <what> <command>...: runs the command every 2
-    # seconds until it succeeds; fails after <seconds>.
-    wait_until() {
-      local deadline=$((SECONDS + $1)) what=$2
-      shift 2
-      until "$@"; do
-        if ((SECONDS >= deadline)); then
-          echo "Gave up waiting for $what." >&2
-          return 1
-        fi
-        sleep 2
-      done
-    }
+    ${(import ../lib/shell.nix).waitUntil}
 
     # bao_status: sets $status to the output of `bao status -format=json`,
     # which is JSON also when OpenBao is sealed or not initialised (exit
