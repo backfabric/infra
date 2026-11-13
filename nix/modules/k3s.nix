@@ -28,8 +28,28 @@
 #   - the Kubernetes API is not reachable from outside: no port is opened on
 #     the uplink. `kubectl` runs on the host as root, with the kubeconfig k3s
 #     writes to /etc/rancher/k3s/k3s.yaml;
+#   - every namespace is declared in `backfabric.k3s.namespaces` and closed
+#     by default (ADR 0029, below);
 #   - manifests that modules no longer deploy are removed from the cluster
 #     (`backfabric.k3s.removedManifests`, below).
+#
+# Namespaces. The API server rejects the creation of a namespace that is
+# not declared (the admission policy `backfabric-declared-namespaces`;
+# only CREATE: names cannot change, and an existing namespace is never
+# blocked). A declared namespace is created by Nix (`createdBy = "nix"`,
+# the default: a Namespace object in the k3s manifest
+# `backfabric-namespaces`) or by a named external creator with a reason.
+# Its network policies are generated (`networkPolicies = "default-deny"`,
+# the default: deny all ingress and egress of every pod, allow egress to
+# CoreDNS, plus the declared `ingress` and `egress` rules) or not, with a
+# reason. k3s's embedded NetworkPolicy controller (kube-router) has no
+# cluster-wide policies (AdminNetworkPolicy, BaselineAdminNetworkPolicy)
+# and does not close a namespace without policies, hence one set per
+# namespace. Removing a declaration removes what was generated for it:
+# k3s prunes the objects that disappear from `backfabric-namespaces`, so a
+# namespace Nix created is deleted with everything in it; one created
+# elsewhere stays, without the generated policies, and can then not be
+# created again until it is declared.
 #
 # Removing manifests. k3s applies every file in
 # /var/lib/rancher/k3s/server/manifests and ignores files that disappear:
@@ -241,6 +261,131 @@ let
       };
     }
   ];
+
+  # Rejects the creation of every namespace not in `namespaces` (ADR 0029).
+  # CREATE only: a name cannot change, so an update cannot bring an
+  # undeclared namespace into existence, and blocking updates would wedge
+  # namespaces that existed before their declaration (re-applied by their
+  # installers, labelled by controllers).
+  declaredNamespacesPolicy = "backfabric-declared-namespaces";
+  namespacesManifestName = "backfabric-namespaces";
+  dnsLabel = "[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?";
+  # An exception (not created by Nix, or policies not generated) needs a
+  # reason.
+  isException = ns: ns.createdBy != "nix" || ns.networkPolicies != "default-deny";
+
+  networkPolicy = namespace: name: spec: {
+    apiVersion = "networking.k8s.io/v1";
+    kind = "NetworkPolicy";
+    metadata = { inherit name namespace; };
+    # Every pod of the namespace.
+    spec = {
+      podSelector = { };
+    }
+    // spec;
+  };
+
+  # Per closed namespace: deny all ingress and egress, allow DNS to k3s's
+  # CoreDNS (whose pods k3s labels k8s-app=kube-dns, listening on 53), and
+  # the declared rules. Named with the prefix `backfabric-`, apart from the
+  # policies modules add themselves.
+  generatedPolicies =
+    name: ns:
+    [
+      (networkPolicy name "backfabric-default-deny" {
+        policyTypes = [
+          "Ingress"
+          "Egress"
+        ];
+      })
+      (networkPolicy name "backfabric-allow-dns" {
+        policyTypes = [ "Egress" ];
+        egress = [
+          {
+            to = [
+              {
+                namespaceSelector.matchLabels."kubernetes.io/metadata.name" = "kube-system";
+                podSelector.matchLabels."k8s-app" = "kube-dns";
+              }
+            ];
+            ports = [
+              {
+                protocol = "UDP";
+                port = 53;
+              }
+              {
+                protocol = "TCP";
+                port = 53;
+              }
+            ];
+          }
+        ];
+      })
+    ]
+    ++ lib.optional (ns.ingress != [ ] || ns.egress != [ ]) (
+      networkPolicy name "backfabric-allow" (
+        {
+          policyTypes =
+            lib.optional (ns.ingress != [ ]) "Ingress" ++ lib.optional (ns.egress != [ ]) "Egress";
+        }
+        // lib.optionalAttrs (ns.ingress != [ ]) { inherit (ns) ingress; }
+        // lib.optionalAttrs (ns.egress != [ ]) { inherit (ns) egress; }
+      )
+    );
+
+  # wrangler (k3s's apply) applies the kinds in the order they first
+  # appear, continues past an object that fails, and k3s retries the file
+  # until all succeed: the policy, then the Namespaces, then their
+  # policies (a policy for a namespace its external creator has not
+  # created yet succeeds once it exists).
+  namespacesManifest = [
+    {
+      apiVersion = "admissionregistration.k8s.io/v1";
+      kind = "ValidatingAdmissionPolicy";
+      metadata.name = declaredNamespacesPolicy;
+      spec = {
+        failurePolicy = "Fail";
+        matchConstraints.resourceRules = [
+          {
+            apiGroups = [ "" ];
+            apiVersions = [ "v1" ];
+            operations = [ "CREATE" ];
+            resources = [ "namespaces" ];
+          }
+        ];
+        validations = [
+          {
+            # A CEL list of strings, written as JSON.
+            expression = "object.metadata.name in ${builtins.toJSON (lib.attrNames cfg.namespaces)}";
+            messageExpression = "'namespace ' + object.metadata.name + ' is not declared: every namespace is declared in backfabric.k3s.namespaces (ADR 0029)'";
+            reason = "Forbidden";
+          }
+        ];
+      };
+    }
+    {
+      apiVersion = "admissionregistration.k8s.io/v1";
+      kind = "ValidatingAdmissionPolicyBinding";
+      metadata.name = declaredNamespacesPolicy;
+      spec = {
+        policyName = declaredNamespacesPolicy;
+        validationActions = [
+          "Deny"
+          "Audit"
+        ];
+      };
+    }
+  ]
+  ++ lib.mapAttrsToList (name: _: {
+    apiVersion = "v1";
+    kind = "Namespace";
+    metadata.name = name;
+  }) (lib.filterAttrs (_: ns: ns.createdBy == "nix") cfg.namespaces)
+  ++ lib.concatLists (
+    lib.mapAttrsToList generatedPolicies (
+      lib.filterAttrs (_: ns: ns.networkPolicies == "default-deny") cfg.namespaces
+    )
+  );
 in
 {
   options.backfabric.k3s = {
@@ -314,15 +459,159 @@ in
         new list without blocking anything.
       '';
     };
+
+    namespaces = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            createdBy = lib.mkOption {
+              type = lib.types.nonEmptyStr;
+              default = "nix";
+              example = "ate-setup";
+              description = ''
+                Who creates the namespace. `nix`: the k3s manifest
+                `${namespacesManifestName}`, as a Namespace object; removing
+                the declaration, or changing this value, deletes the namespace
+                and everything in it. Anything else names the external creator
+                (an installer, another manifest, a person); the namespace is
+                then only admitted, and `reason` says why Nix does not create
+                it.
+              '';
+            };
+
+            networkPolicies = lib.mkOption {
+              type = lib.types.enum [
+                "default-deny"
+                "unmanaged"
+              ];
+              default = "default-deny";
+              description = ''
+                `default-deny`: NetworkPolicies generated into
+                `${namespacesManifestName}` deny every ingress and egress of
+                every pod in the namespace (`backfabric-default-deny`), except
+                DNS to k3s's CoreDNS (`backfabric-allow-dns`) and the rules of
+                `ingress` and `egress` (`backfabric-allow`). Modules may add
+                their own NetworkPolicies for single pods; NetworkPolicies
+                only add allowed traffic. `unmanaged`: none are generated, the
+                namespace has what its creator or its module gives it
+                (possibly none: open); `reason` says why.
+              '';
+            };
+
+            reason = lib.mkOption {
+              type = lib.types.nullOr lib.types.nonEmptyStr;
+              default = null;
+              description = ''
+                Why the namespace is an exception: required unless
+                `createdBy` is `nix` and `networkPolicies` is `default-deny`.
+              '';
+            };
+
+            ingress = lib.mkOption {
+              type = lib.types.listOf (lib.types.attrsOf lib.types.anything);
+              default = [ ];
+              example = [
+                {
+                  from = [ { namespaceSelector.matchLabels."kubernetes.io/metadata.name" = "dispatcher"; } ];
+                  ports = [
+                    {
+                      protocol = "TCP";
+                      port = 8080;
+                    }
+                  ];
+                }
+              ];
+              description = ''
+                Ingress allowed to every pod of the namespace, as
+                NetworkPolicyIngressRule objects (`from`, `ports`). Only with
+                `networkPolicies = "default-deny"`.
+              '';
+            };
+
+            egress = lib.mkOption {
+              type = lib.types.listOf (lib.types.attrsOf lib.types.anything);
+              default = [ ];
+              example = [
+                {
+                  to = [ { namespaceSelector.matchLabels."kubernetes.io/metadata.name" = "postgres"; } ];
+                  ports = [
+                    {
+                      protocol = "TCP";
+                      port = 5432;
+                    }
+                  ];
+                }
+              ];
+              description = ''
+                Egress allowed from every pod of the namespace, besides DNS,
+                as NetworkPolicyEgressRule objects (`to`, `ports`). Only with
+                `networkPolicies = "default-deny"`. What runs on the host (the
+                API server's 6443, OpenBao, the Collector) is reached at the
+                node's address after kube-proxy's translation: allow it with
+                an `ipBlock` of that address and the port.
+              '';
+            };
+          };
+        }
+      );
+      default = { };
+      description = ''
+        Every namespace of the cluster, by name (ADR 0029): the admission
+        policy `${declaredNamespacesPolicy}` rejects the creation of any
+        other. Set by the module that uses a namespace (the k3s module
+        declares k3s's own), and by the host configuration for its
+        workloads. Namespaces that existed before their declaration are not
+        affected by the policy.
+      '';
+    };
   };
 
   config = {
-    assertions = [
-      {
-        assertion = lib.intersectLists deployedManifests cfg.removedManifests == [ ];
-        message = "backfabric.k3s.removedManifests contains deployed k3s manifests: ${lib.concatStringsSep ", " (lib.intersectLists deployedManifests cfg.removedManifests)}";
-      }
-    ];
+    assertions =
+      let
+        failing = pred: lib.concatStringsSep ", " (lib.attrNames (lib.filterAttrs pred cfg.namespaces));
+        check = message: pred: {
+          assertion = failing pred == "";
+          message = "backfabric.k3s.namespaces: ${message}: ${failing pred}";
+        };
+        undeclaredExemptions = lib.subtractLists (lib.attrNames cfg.namespaces) (
+          lib.attrNames cfg.podSecurityExemptions
+        );
+      in
+      [
+        {
+          assertion = lib.intersectLists deployedManifests cfg.removedManifests == [ ];
+          message = "backfabric.k3s.removedManifests contains deployed k3s manifests: ${lib.concatStringsSep ", " (lib.intersectLists deployedManifests cfg.removedManifests)}";
+        }
+        (check "names must be DNS labels (lower case, digits, `-`, at most 63)" (
+          name: _: builtins.match dnsLabel name == null
+        ))
+        (check "exceptions (createdBy not \"nix\", or networkPolicies \"unmanaged\") need a reason" (
+          _: ns: isException ns && ns.reason == null
+        ))
+        (check "ingress and egress rules need networkPolicies = \"default-deny\"" (
+          _: ns: ns.networkPolicies != "default-deny" && (ns.ingress != [ ] || ns.egress != [ ])
+        ))
+        {
+          assertion = undeclaredExemptions == [ ];
+          message = "backfabric.k3s.podSecurityExemptions names namespaces not declared in backfabric.k3s.namespaces: ${lib.concatStringsSep ", " undeclaredExemptions}";
+        }
+      ];
+
+    # The namespaces the API server creates and keeps (ADR 0029). Network
+    # policies select pods only: the API server's Service `kubernetes` in
+    # `default` stays reachable.
+    backfabric.k3s.namespaces = {
+      kube-system = {
+        createdBy = "k3s";
+        networkPolicies = "unmanaged";
+        reason = "Created by the API server for k3s's system pods: CoreDNS, which every pod queries, and the Helm controller's jobs. Their traffic is k3s's to define; closing it would need rules per component, kept in step with every k3s release.";
+      };
+    }
+    // lib.genAttrs [ "default" "kube-public" "kube-node-lease" ] (_: {
+      createdBy = "k3s";
+      reason = "Created by the API server; no pods run here, so it is closed like a namespace Nix creates.";
+    });
 
     # The image policy exists only while a namespace is exempt.
     backfabric.k3s.removedManifests = lib.mkIf (cfg.podSecurityExemptions == { }) [
@@ -415,6 +704,11 @@ in
       manifests.${exemptImagesPolicy} = lib.mkIf (cfg.podSecurityExemptions != { }) {
         content = exemptImagesManifest;
       };
+      # Sorts before the subsystems' files (`openbao`, `postgres*`,
+      # `substrate-*`, ...): the namespaces Nix creates exist, closed,
+      # before objects are applied into them. A file that sorts earlier
+      # and applies into one fails until k3s retries it.
+      manifests.${namespacesManifestName}.content = namespacesManifest;
       manifests.${externalServicesPolicy}.content = [
         {
           apiVersion = "admissionregistration.k8s.io/v1";

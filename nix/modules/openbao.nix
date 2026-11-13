@@ -604,6 +604,15 @@ in
       }
     ];
 
+    # Declared as it is created today; the generated Namespace and
+    # default-deny replace the manifest's in this module's own change
+    # (ADR 0029).
+    backfabric.k3s.namespaces.${namespace} = {
+      createdBy = "the k3s manifest `openbao` of the openbao module";
+      networkPolicies = "unmanaged";
+      reason = "Created with the Service in the module's own manifest; no pods run there (the Service points at OpenBao on the host) and it has no NetworkPolicies. Not yet moved to the generated Namespace and default-deny (ADR 0029).";
+    };
+
     networking.firewall.interfaces.cni0.allowedTCPPorts = [ port ];
   };
 }

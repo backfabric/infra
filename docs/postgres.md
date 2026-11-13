@@ -142,7 +142,8 @@ about 30 seconds.
 
 Add an entry to `databases` and deploy. k3s applies the new `Database` and
 role; `postgres-credentials` generates the role's password and writes the
-service's Secret (creating the namespace if it does not exist). Several
+service's Secret (creating the namespace if it does not exist; the module
+declares it as such unless the host declares it itself, ADR 0029). Several
 databases may share an owner. Removing an entry keeps the database (reclaim
 policy `retain`), the role and both Secrets; drop them with `psql` (above)
 and `kubectl delete secret`.

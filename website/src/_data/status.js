@@ -93,6 +93,11 @@ export default {
       text: "Hatchet in the cluster, on the platform PostgreSQL, as the queue behind the dispatcher.",
       links: [pr(84), issue(83)],
     },
+    {
+      title: "Closed namespaces",
+      text: "Every namespace is declared in Nix; undeclared ones are rejected, declared ones deny all traffic but DNS unless rules allow it.",
+      links: [pr(90), issue(89), adr("0029", "declared-namespaces-closed-by-default")],
+    },
   ],
   planned: [
     {

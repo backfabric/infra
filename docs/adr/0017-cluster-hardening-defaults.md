@@ -1,5 +1,5 @@
 ---
-status: amended by ADR 0024
+status: amended by ADR 0024 and ADR 0029
 ---
 
 # Cluster hardening defaults
@@ -16,7 +16,7 @@ The `k3s` subsystem follows the [K3s CIS hardening guide](https://docs.k3s.io/se
 - The host firewall opens only port 6443 on `cni0`, which pods need to reach the API server through the `kubernetes` Service. k3s's documentation for firewalled hosts trusts the whole pod and service CIDRs instead; that would let every pod reach every port of the host.
 - Not applied:
   - the guide's manual or permissive controls: PKI file permissions (a manual chmod of files k3s manages), `AlwaysPullImages` (contradicts the airgap images), `request-timeout` (the benchmark advises the default), `pod-max-pids` (no value fits every workload yet), and the patches of the default service accounts (manual `kubectl patch`, done with the workloads);
-  - the per-namespace NetworkPolicies, which come with the workloads.
+  - the per-namespace NetworkPolicies, which come with the workloads (since ADR 0029, every namespace is declared in Nix and gets a generated default-deny unless declared as an exception).
 - Known gap, tracked in the backlog: the SSH port is open on every interface, including `cni0`, so pods can reach the host's sshd.
 
 ## Recorded constraints
