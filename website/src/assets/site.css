@@ -1,5 +1,5 @@
-/* backfabric.dev. Dark, with the colours of a sunset; the home page's cloth
-   is drawn by site.js, everything else here. */
+/* backfabric.dev. Dark, with the colours of a sunset. The home page's
+   picture is generated at build time (src/_data/scene.js) and layered here. */
 
 @font-face {
   font-family: "Anton";
@@ -371,22 +371,93 @@ p {
   min-height: max(100svh, 46rem);
   overflow: hidden;
   isolation: isolate;
-  /* Roughly the cloth's picture, for while it loads and where WebGL is off. */
-  background:
-    linear-gradient(90deg, rgb(7 5 26 / 0.75), transparent 70%),
-    linear-gradient(180deg, #08051f 0%, #2b1170 20%, #9e248f 36%, #ff5a6b 45%, #ffbd66 49.6%, #3a1250 50%, #170a33 70%, #07051a 100%);
+  /* The top of the sky: shown while the picture loads and where it sinks. */
+  background: #110a3a;
 }
-.cloth {
+
+/* The picture (src/_data/scene.js), in layers from back to front. In the
+   hero they are stacked around the words: sky and city, the wordmark, the
+   palms, then everything there is to read. */
+.scene {
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.scene-front {
+  z-index: 2;
+}
+/* Sky and city share a frame and a focal point, so the sun stays in view and
+   above its reflection at any size. */
+.art {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  opacity: 0;
-  transition: opacity 1.2s ease;
+  object-fit: cover;
+  object-position: 64% 100%;
 }
-.cloth[data-live] {
-  opacity: 1;
+.palm,
+.thicket {
+  position: absolute;
+  width: auto;
+  max-width: none;
+}
+.palm {
+  bottom: -5%;
+  transform-origin: var(--foot) 100%;
+}
+.thicket {
+  bottom: -1px;
+  height: auto;
+}
+.thicket-left {
+  left: 0;
+  transform: scaleX(-1);
+}
+.thicket-right {
+  right: 0;
+}
+/* As tall as the picture allows, but never so tall on a narrow screen that
+   one crown fills it. */
+.hero .palm-a {
+  right: -3.5%;
+  height: min(98%, 66vw);
+}
+.hero .palm-b {
+  right: -9%;
+  height: min(62%, 44vw);
+}
+.hero .thicket-left {
+  width: clamp(11rem, 28%, 32rem);
+}
+.hero .thicket-right {
+  width: clamp(15rem, 42%, 46rem);
+}
+/* Shade behind the words and the bar, for contrast on the bright picture. */
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(64% 70% at 8% 74%, rgb(13 7 40 / 0.86), rgb(13 7 40 / 0.5) 55%, transparent 100%),
+    linear-gradient(180deg, rgb(13 7 40 / 0.45), transparent 22%);
+  pointer-events: none;
+}
+/* The layers move apart with the scroll (--p) and the pointer (--px), which
+   site.js sets; without it they stand still. */
+.hero .art-sky {
+  translate: 0 calc(var(--p, 0) * 10rem);
+}
+.hero .art-city {
+  translate: 0 calc(var(--p, 0) * 4.5rem);
+}
+.hero .palm {
+  translate: calc(var(--px, 0) * -0.9rem) calc(var(--py, 0) * -0.3rem);
+  transition: translate 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 .hero-inner {
   width: 100%;
@@ -413,20 +484,37 @@ p {
   box-shadow: 0 0 12px var(--teal);
 }
 .wordmark {
+  position: relative;
+  z-index: 1;
+  /* As wide as the word: the gradient is cut to this box. */
   width: max-content;
   margin-left: -0.03em;
+  padding-bottom: 0.06em;
+  /* Lit like the clouds: cream down to the pink of the horizon. */
+  background: linear-gradient(180deg, #fffaf0 14%, #ffe6b8 48%, #ffa98e 74%, #ff5fa0 96%);
+  -webkit-background-clip: text;
+  background-clip: text;
   color: var(--cream);
+  -webkit-text-fill-color: transparent;
   font-family: var(--display);
-  font-size: clamp(4.4rem, 17.4vw, 17.5rem);
+  font-size: clamp(4.4rem, 16.2vw, 16.5rem);
   font-weight: 400;
   letter-spacing: 0.004em;
   line-height: 0.8;
   text-transform: uppercase;
+  filter: drop-shadow(0 0.03em 0 rgb(74 18 104 / 0.55)) drop-shadow(0 0.08em 0.28em rgb(13 7 40 / 0.5));
+  translate: 0 calc(var(--p, 0) * 6rem);
 }
-/* Below the horizon, which site.js draws just under the wordmark. */
+.kicker,
+.hero-copy,
+.facts {
+  position: relative;
+  z-index: 3;
+}
 .hero-copy {
   max-width: 37rem;
-  margin-top: clamp(7rem, 19vh, 12rem);
+  margin-top: clamp(1.5rem, 5vh, 3.5rem);
+  opacity: calc(1 - var(--p, 0) * 1.7);
 }
 .pitch {
   color: var(--cream);
@@ -465,16 +553,40 @@ p {
   vertical-align: -0.12em;
 }
 
+/* ---------- The band under the hero ---------- */
+
+.marquee {
+  position: relative;
+  z-index: 3;
+  margin: -1.7rem -2vw 0;
+  padding: 0.85rem 0;
+  overflow: hidden;
+  background: var(--sun);
+  box-shadow: 0 20px 60px -20px rgb(255 46 136 / 0.6);
+  rotate: -1.4deg;
+}
+.marquee-track {
+  display: flex;
+  gap: 1.6rem;
+  width: max-content;
+  color: #1b0714;
+  font-family: var(--display);
+  font-size: clamp(1.3rem, 2.4vw, 2rem);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.marquee-track b {
+  color: #5b1a8f;
+  font-weight: 400;
+}
+
 /* ---------- Sections ---------- */
 
-/* The page proper slides over the foot of the hero. */
 .sheet {
   position: relative;
   z-index: 2;
-  margin-top: -1.75rem;
-  border-radius: 1.75rem 1.75rem 0 0;
   background: var(--bg);
-  box-shadow: 0 -30px 60px -20px rgb(7 5 26 / 0.9);
 }
 .section {
   position: relative;
@@ -1166,50 +1278,55 @@ html:not(.js) .plate {
 
 /* ---------- Finale and footer ---------- */
 
+/* The same shore later in the evening. Only the still layers are darkened; a
+   filter over the swaying palms would be redrawn every frame. */
 .finale {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  min-height: min(100svh, 58rem);
+  min-height: min(100svh, 60rem);
   margin-top: clamp(2rem, 6vw, 5rem);
   overflow: hidden;
   isolation: isolate;
-  background: linear-gradient(180deg, var(--ink) 0%, #120a3d 45%, #1d1a6b 55%, #0a0724 56%, var(--ink) 100%);
+  background: #0b0628;
   text-align: center;
 }
-/* The page's dark runs into the night sky. */
+.finale .art {
+  filter: brightness(0.66) saturate(1.15) hue-rotate(-14deg);
+}
+.finale .palm-a {
+  right: 4%;
+  height: min(90%, 110vw);
+}
+.finale .palm-b {
+  right: -6%;
+  height: min(60%, 74vw);
+}
+.finale .palm-c {
+  left: -2%;
+  height: 78%;
+}
+.finale .thicket {
+  width: clamp(13rem, 36%, 40rem);
+}
+/* The page's dark runs into the sky. */
 .finale::before {
   content: "";
   position: absolute;
-  inset: 0 0 auto;
-  height: 30%;
-  background: linear-gradient(180deg, var(--ink), transparent);
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, var(--ink) 0%, rgb(7 5 26 / 0.6) 20%, transparent 50%);
   pointer-events: none;
 }
 .finale-inner {
   position: relative;
-  padding: clamp(6rem, 14vw, 10rem) var(--pad) 0;
+  z-index: 2;
+  padding: clamp(6rem, 13vw, 10rem) var(--pad) 0;
 }
 .finale .display {
   font-size: clamp(3rem, 9.5vw, 8.5rem);
+  filter: drop-shadow(0 0.06em 0.3em rgb(13 7 40 / 0.6));
 }
 .finale .cta {
   justify-content: center;
-}
-/* The name once more, as wide as the page, sinking into its foot. */
-.colossus {
-  margin: auto 0 -0.16em;
-  padding-top: 4rem;
-  color: transparent;
-  font-family: var(--display);
-  font-size: 21vw;
-  line-height: 0.8;
-  text-transform: uppercase;
-  white-space: nowrap;
-  -webkit-text-stroke: 1.5px rgb(255 244 230 / 0.55);
-  -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 96%);
-  mask-image: linear-gradient(180deg, #000 30%, transparent 96%);
-  user-select: none;
 }
 
 .footer {
@@ -1242,16 +1359,19 @@ html:not(.js) .plate {
   margin: 0 auto;
   padding: 7.5rem var(--pad) 5rem;
 }
-/* A strip of the home page's sky and horizon. */
+/* A strip of the home page's picture: its layers as backgrounds, their
+   addresses from the page (_includes/art.njk). */
 .docs-hero {
   position: relative;
   overflow: hidden;
   padding: clamp(2.5rem, 6vw, 4.5rem) clamp(1.5rem, 5vw, 4rem);
   border-radius: 1.75rem;
   background:
-    radial-gradient(34rem 12rem at 78% 100%, rgb(255 194 102 / 0.75), transparent 70%),
-    linear-gradient(90deg, rgb(7 5 26 / 0.7), transparent 70%),
-    linear-gradient(180deg, #0a0624 0%, #2b1170 38%, #9e248f 72%, #ff5a6b 92%, #ffbd66 100%);
+    linear-gradient(90deg, rgb(13 7 40 / 0.8) 0%, rgb(13 7 40 / 0.5) 45%, rgb(13 7 40 / 0.05) 80%),
+    var(--palm, none) right 4% bottom -4rem / var(--palm-size, auto 135%) no-repeat,
+    var(--city, none) 64% 76% / cover no-repeat,
+    var(--sky, linear-gradient(180deg, #110a3a, #84228f 60%, #ff7d62)) 64% 76% / cover no-repeat,
+    #110a3a;
   color: var(--cream);
 }
 .docs-hero .eyebrow {
@@ -1570,8 +1690,24 @@ th {
   }
 }
 @media (max-width: 640px) {
-  .hero-copy {
-    margin-top: clamp(6rem, 16vh, 9rem);
+  .hero .palm-a {
+    right: -24%;
+    height: min(64%, 150vw);
+  }
+  .hero .palm-b,
+  .finale .palm-b,
+  .finale .palm-c {
+    display: none;
+  }
+  .finale .palm-a {
+    right: -12%;
+  }
+  .hero::after {
+    background: linear-gradient(180deg, rgb(13 7 40 / 0.7) 0%, rgb(13 7 40 / 0.6) 60%, transparent 85%);
+  }
+  /* No room for the palm beside the text. */
+  .docs-hero {
+    --palm-size: 0 0;
   }
   .layer {
     grid-template-columns: minmax(0, 1fr);
@@ -1616,6 +1752,21 @@ th {
   }
   .log ol {
     animation: roll 16s linear infinite;
+  }
+  .marquee-track {
+    animation: marquee 40s linear infinite;
+  }
+  /* The palms move in the breeze, each at its own pace. */
+  .palm {
+    animation: sway 7s ease-in-out infinite alternate;
+  }
+  .palm-b {
+    animation-duration: 5.6s;
+    animation-delay: -2s;
+  }
+  .palm-c {
+    animation-duration: 8.4s;
+    animation-delay: -4s;
   }
   .hero-inner > *,
   .facts {
@@ -1694,5 +1845,18 @@ th {
   }
   to {
     max-width: calc(var(--n) * 1ch);
+  }
+}
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes sway {
+  from {
+    rotate: -0.45deg;
+  }
+  to {
+    rotate: 0.55deg;
   }
 }

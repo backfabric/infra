@@ -23,6 +23,9 @@
 <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
 <link rel="preload" href="/assets/fonts/anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+{%- for name in preload %}
+<link rel="preload" href="{{ scene[name].src }}" as="image" type="image/svg+xml">
+{%- endfor %}
 <link rel="stylesheet" href="{{ assets.css }}">
 <script type="module" src="{{ assets.js }}"></script>
 </head>

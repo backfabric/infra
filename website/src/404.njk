@@ -4,7 +4,8 @@ title: Not found
 permalink: /404.html
 bodyClass: docs
 ---
-<header class="docs-hero">
+{% from "art.njk" import strip %}
+<header class="docs-hero" {{ strip(scene) }}>
   <p class="eyebrow">404</p>
   <h1 class="display">Off the map</h1>
   <p class="intro">This page does not exist. Try the <a href="/">home page</a> or the <a href="/docs/">docs</a>.</p>
