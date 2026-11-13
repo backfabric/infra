@@ -192,7 +192,7 @@ preload:
         <p class="layer-no" aria-hidden="true">04</p>
         <div>
           <h3>Agent runtime <span class="badge badge-ok">shipped</span></h3>
-          <p>Agent Substrate runs each agent as a long-lived actor in a gVisor sandbox: frozen to a snapshot between tasks, resumed on the next request. The agent itself is a container image built by Nix, Codex plus a small supervisor, published with build provenance. The runtime is off until you enable it.</p>
+          <p>Agent Substrate runs each agent as a long-lived actor in a gVisor sandbox: frozen to a snapshot between tasks, resumed on the next request. The agent itself is a container image built by Nix, Codex behind an A2A supervisor and logged in with the user's ChatGPT subscription, published with build provenance. The runtime is off until you enable it.</p>
           <p class="chips"><span>Agent Substrate</span><span>gVisor</span><span>Nix-built image</span><span>SLSA provenance</span></p>
         </div>
       </li>

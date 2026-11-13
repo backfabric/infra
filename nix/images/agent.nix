@@ -1,5 +1,5 @@
-# The container image of an agent, ghcr.io/backfabric/agent: Codex and a
-# small HTTP supervisor (./supervisor.py), run as an Agent Substrate actor.
+# The container image of an agent, ghcr.io/backfabric/agent: Codex behind
+# the A2A supervisor (agent/supervisor.py), run as an Agent Substrate actor.
 # Built and published by .github/workflows/agent-image.yml; see
 # docs/agent-image.md. Contains no secrets: each actor logs in to Codex at
 # run time.
@@ -16,12 +16,19 @@
   diffutils,
   gitMinimal,
   cacert,
-  python3Minimal,
+  python3,
 }:
 let
   uid = 1000;
   gid = 1000;
   home = "/home/agent";
+
+  # The supervisor's interpreter: the A2A SDK (its Starlette server) and
+  # uvicorn.
+  python = python3.withPackages (ps: [
+    (ps.callPackage ../packages/a2a-sdk.nix { })
+    ps.uvicorn
+  ]);
 
   # Codex's own release, not nixpkgs (0.146.0 in NixOS 26.05). The package
   # archive is what upstream's install.sh installs: the static musl `codex`
@@ -80,7 +87,7 @@ dockerTools.buildLayeredImage {
     diffutils
     gitMinimal
     cacert
-    python3Minimal
+    python
     codex
   ];
   fakeRootCommands = ''
@@ -102,9 +109,9 @@ dockerTools.buildLayeredImage {
     User = "${toString uid}:${toString gid}";
     WorkingDir = home;
     Entrypoint = [
-      "${python3Minimal}/bin/python3"
+      "${python}/bin/python3"
       "-u"
-      "${./supervisor.py}"
+      "${../../agent/supervisor.py}"
     ];
     # Port 80 needs NET_BIND_SERVICE, which a non-root actor process does
     # not get (no ambient capabilities in Substrate's sandboxes).

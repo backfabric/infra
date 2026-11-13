@@ -43,9 +43,10 @@ requires them there for the flake to be `github:backfabric/infra`.
   evaluated by `checks.x86_64-linux.template-empty` and
   `checks.x86_64-linux.template-with-host`.
 - `nix/images/`: the agents' container image `ghcr.io/backfabric/agent`
-  (Codex and an HTTP supervisor, run as an Agent Substrate actor),
+  (Codex behind the A2A supervisor, run as an Agent Substrate actor),
   `packages.x86_64-linux.agent-image`, built and published by CI, see
   [docs/agent-image.md](docs/agent-image.md).
+- `agent/`: the image's supervisor, which serves A2A 1.0 and runs Codex.
 - `website/`: the project website at <https://backfabric.dev> (Eleventy),
   generated from this README, the template's README, and `docs/`;
   `packages.<system>.website` (`nix/website.nix`), published to GitHub
