@@ -81,6 +81,14 @@
     ];
   };
 
+  # Hatchet on the platform PostgreSQL (database `hatchet`), with a client
+  # token in the Secret `hatchet-client-token` of the namespace `dispatcher`
+  # once the module that runs the dispatcher has created it.
+  backfabric.hatchet = {
+    enable = true;
+    clientNamespaces = [ "dispatcher" ];
+  };
+
   # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,
   # with the report that `backfabric probe` generates with nixos-facter. This
   # excerpt has the shape of a real report of a Hetzner server (fields the

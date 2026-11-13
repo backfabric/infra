@@ -79,4 +79,17 @@ inputs: {
       ./postgres.nix
     ];
   };
+  # Also imports the subsystems it reads options of or configures (the node
+  # address, k3s's package and manifests, the platform PostgreSQL's
+  # databases).
+  hatchet = {
+    imports = [
+      inputs.sops-nix.nixosModules.sops
+      ./secrets.nix
+      ./network.nix
+      ./k3s.nix
+      ./postgres.nix
+      ./hatchet.nix
+    ];
+  };
 }

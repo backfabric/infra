@@ -59,6 +59,7 @@ requires them there for the flake to be `github:backfabric/infra`.
   [OpenBao](docs/openbao.md),
   [the audit telemetry collector](docs/otel.md),
   [the platform PostgreSQL](docs/postgres.md),
+  [Hatchet](docs/hatchet.md),
   [the agent image](docs/agent-image.md),
   [Agent Substrate](docs/substrate.md);
   architectural decisions in [docs/adr/](docs/adr/).
@@ -197,6 +198,15 @@ nix flake init -t github:backfabric/infra
   the namespace of the service that uses it: only those namespaces may
   connect, and each gets a Secret with the connection details and a
   generated password. See [docs/postgres.md](docs/postgres.md).
+- `hatchet` (off by default): [Hatchet](https://hatchet.run/), the
+  platform's task queue ([ADR 0027](docs/adr/0027-hatchet-task-queue.md)),
+  in `hatchet`: engine, API and dashboard from its release images pinned
+  by digest, Pod Security `restricted`, its database and message queue on
+  the platform PostgreSQL (no RabbitMQ). gRPC without TLS, only from
+  `backfabric.hatchet.clientNamespaces`, each of which gets a generated
+  client token; the dashboard through `kubectl port-forward` only; keys
+  and the admin generated in the cluster, sign-up off. See
+  [docs/hatchet.md](docs/hatchet.md).
 
 ## Checks
 

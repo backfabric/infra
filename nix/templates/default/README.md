@@ -354,6 +354,23 @@ backfabric.postgres = {
 There are no backups yet. Status, connecting, and turning it off:
 [platform PostgreSQL](https://github.com/backfabric/infra/blob/main/docs/postgres.md).
 
+## Hatchet
+
+Hatchet, the platform's task queue, in the cluster, off by default; it
+needs the platform PostgreSQL. Pods in `clientNamespaces` may use its
+engine and find a client token in the Secret `hatchet-client-token`:
+
+```nix
+backfabric.hatchet = {
+  enable = true;
+  clientNamespaces = [ "dispatcher" ];
+};
+```
+
+The dashboard (through `ssh -L` and `kubectl port-forward`), the admin
+login, a smoke test and turning it off:
+[Hatchet](https://github.com/backfabric/infra/blob/main/docs/hatchet.md).
+
 ## Unlock after a reboot
 
 After every reboot the host waits for the LUKS passphrase in the initrd.
