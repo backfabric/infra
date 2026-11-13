@@ -18,7 +18,7 @@ Agents are at first a static list in the private repository: name, profile (acto
 
 ## Considered Options
 
-- [kagent](https://kagent.dev/): runs agents as its own Deployments with its own runtime and model configuration, not as Substrate actors running Codex; we would bypass most of it and still need the record and the queue.
+- [kagent](https://kagent.dev/) 1.0, which runs on Agent Substrate (one actor per session, Substrate v1.0.0, Codex, Claude or own harnesses, sessions in Postgres): its Codex harness supports only API keys (no subscription login); an own image must implement its A2A gRPC contract; its control-plane authorizer permits everything and its authentication trusts unverified headers by default; agent-to-agent delegation and dedicated child agents are deferred; it has no queue serializing each thread and no channel adapters. We would wrap it in our own authorization and queue anyway.
 - [agentgateway](https://agentgateway.dev/) in front, for authentication and routing: deferred. It can be put in front later without changing callers (same A2A endpoints and tokens) or agents.
 - Restate, Temporal or DBOS for durable execution: Temporal is a cluster of its own services; Restate's server is under the BSL; DBOS runs in the process on Postgres, but its Go SDK is young. The queue itself is ADR 0027.
 - A queue on Postgres only (our own `SKIP LOCKED` table, or River): per-key concurrency, retries, cancellation and a dashboard would be ours to write, or are in River's paid edition.
