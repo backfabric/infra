@@ -77,6 +77,16 @@ and `SERVER_URL` are set for it) and log in as `admin@example.com` with:
 ssh node1 kubectl -n hatchet get secret hatchet-admin -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d
 ```
 
+The login page shows a "Sign up" link in any case (Hatchet v0.114.2's
+dashboard has no setting to hide it); the server refuses registrations.
+With the port-forward open:
+
+```sh
+curl -s localhost:8080/api/v1/meta | grep -o '"allowSignup":[a-z]*'   # "allowSignup":false
+curl -s -X POST localhost:8080/api/v1/users/register -H 'Content-Type: application/json' \
+  -d '{"name":"x","email":"x@example.com","password":"Xx123456789"}'      # 400, "user signups are disabled"
+```
+
 ## Clients
 
 A pod in a namespace of `clientNamespaces` reaches the engine and loads
@@ -93,7 +103,9 @@ envFrom:
 The token's `server_url` claim is `http://localhost:8080`: clients that
 call Hatchet's REST API need the dashboard's port-forward; workers and
 everything over gRPC (registering workers, triggering runs, waiting for
-results) do not. A pod in any other namespace gets "Connection refused".
+results) do not. A pod in any other namespace has its connections to the
+engine refused (kube-router rejects them): the SDK fails with gRPC
+`UNAVAILABLE` "Connection refused" at once, not after a timeout.
 
 ### Smoke test
 
@@ -157,9 +169,11 @@ Tokens); `hatchet-admin` has no command for it.
 Remove it from `clientNamespaces` and deploy: NetworkPolicy no longer
 admits it, and `hatchet-credentials` deletes the Secrets it labelled
 `backfabric.io/hatchet-client=<namespace>`: `hatchet/hatchet-token-<namespace>`
-and `<namespace>/hatchet-client-token`. The token itself stays valid
-(100 years); revoke it in the dashboard (Settings, API Tokens; it is
-named `default`, created at the time in the unit's journal).
+and `<namespace>/hatchet-client-token`. The namespace itself stays (it may
+have been created by `hatchet-credentials`; delete it by hand if nothing
+else uses it). The token stays valid until 2126 (Hatchet issues tenant
+tokens for 100 years); revoke it in the dashboard (Settings, API Tokens;
+it is named `default`, created at the time in the unit's journal).
 
 ## The units
 
@@ -185,10 +199,13 @@ deleted after they complete, their logs go to the unit's journal. After
 fixing a failure, `systemctl start hatchet-credentials`.
 
 Until `hatchet-keys` exists, the engine and the API wait in
-`CreateContainerConfigError`; the kubelet retries. Both run
-`hatchet-migrate` as an init container, which retries its connection for
-30 seconds (kube-router admits a new pod's address a moment after it
-starts) and migrates under a lock, so both can run at once.
+`CreateContainerConfigError`; on the first start they also show
+`FailedMount` events ("secret postgres-hatchet not found") until
+`postgres-credentials` has written the database's Secret. Both are
+transient: the kubelet retries. Both run `hatchet-migrate` as an init
+container, which retries its connection for 30 seconds (kube-router
+admits a new pod's address a moment after it starts) and migrates under
+a lock, so both can run at once.
 
 ## Upgrade
 
@@ -209,7 +226,8 @@ What stays:
 - the database `hatchet` and its role (reclaim policy `retain`), with
   rows encrypted with the deleted keys and the old admin;
 - the Secrets `hatchet-client-token` in the client namespaces, with tokens
-  no new key accepts.
+  no new key accepts, and the client namespaces themselves (also those
+  `hatchet-credentials` created).
 
 Hatchet holds only ids (ADR 0027): the dispatcher's own record is
 canonical. So before enabling it again, drop the database, on the host:

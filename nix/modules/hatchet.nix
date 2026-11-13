@@ -521,6 +521,12 @@ let
         run_job keys k8s quickstart --namespace ${namespace} --resource-name hatchet-keys
       fi
 
+      # Whether the API is up (it seeds the admin and the tenant); quiet,
+      # for polling.
+      api_up() {
+        [[ $(kubectl -n ${namespace} get deployment hatchet-api -o jsonpath='{.status.availableReplicas}' 2>/dev/null) -ge 1 ]]
+      }
+
       # One token per client namespace, minted once (for the default
       # tenant, which the API's init container seeds), and copied to the
       # client's Secret `hatchet-client-token` at every run. Both Secrets
@@ -529,8 +535,7 @@ let
       clients=(${lib.escapeShellArgs cfg.clientNamespaces})
       for client in "''${clients[@]}"; do
         if ! exists -n ${namespace} secret "hatchet-token-$client"; then
-          wait_until 900 "the Deployment ${namespace}/hatchet-api; kubectl -n ${namespace} describe deployment hatchet-api" \
-            kubectl -n ${namespace} rollout status deployment/hatchet-api --timeout=10s
+          wait_until 900 "the Deployment ${namespace}/hatchet-api; kubectl -n ${namespace} describe deployment hatchet-api" api_up
           run_job "token-$client" k8s create-worker-token --namespace ${namespace} --resource-name "hatchet-token-$client"
         fi
         kubectl -n ${namespace} label --overwrite secret "hatchet-token-$client" "${clientLabel}=$client" >/dev/null
