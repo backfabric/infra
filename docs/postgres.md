@@ -62,8 +62,15 @@ role, database, or connection without TLS), from pods in `namespace` only
 `username`, `password` and `ca.crt`. Connect with `sslmode=verify-full`
 against `ca.crt`; mount the Secret as a volume rather than reading
 `ca.crt` into an environment variable: CloudNativePG renews its CA every
-83 days, and `postgres-credentials` copies the new one within a day. For
-libpq clients:
+83 days, and `postgres-credentials` copies the new one within a day.
+
+Clients must retry connecting at startup. kube-router admits a new pod's
+address to PostgreSQL only once it has added it to the NetworkPolicy's
+set of allowed sources, a moment after the pod starts, and rejects its
+packets until then: a connection in the pod's first second can fail with
+"Connection refused", and one a second later succeeds. A connection from a
+namespace that is not in `databases` always fails this way. For libpq
+clients:
 
 ```yaml
 env:
@@ -79,6 +86,57 @@ volumeMounts:
 # volumes:
 #   - { name: postgres, secret: { secretName: postgres-a2a, items: [ { key: ca.crt, path: ca.crt } ] } }
 ```
+
+### Test a connection
+
+On the host, as root, from a pod that passes Pod Security `restricted`, in
+the service's namespace (here `a2a`, Secret `postgres-a2a`):
+
+```sh
+cat >/tmp/psql.yaml <<'YAML'
+apiVersion: v1
+kind: Pod
+metadata: { name: psql, namespace: NS }
+spec:
+  restartPolicy: Never
+  securityContext: { runAsNonRoot: true, runAsUser: 26, seccompProfile: { type: RuntimeDefault } }
+  containers:
+    - name: psql
+      image: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie@sha256:ec2ed3404e89fff99643901b58a2a34c46a46345fe69a3d96500b82f995c327b
+      # Retries for up to 30 s: see "Clients must retry" above.
+      command:
+        - sh
+        - -c
+        - |
+          for i in $(seq 30); do
+            psql -c "select current_user, current_database(), ssl from pg_stat_ssl where pid = pg_backend_pid()" && exit 0
+            sleep 1
+          done
+          exit 1
+      securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+      env:
+        - { name: PGHOST, valueFrom: { secretKeyRef: { name: SECRET, key: host } } }
+        - { name: PGDATABASE, valueFrom: { secretKeyRef: { name: SECRET, key: dbname } } }
+        - { name: PGUSER, valueFrom: { secretKeyRef: { name: SECRET, key: username } } }
+        - { name: PGPASSWORD, valueFrom: { secretKeyRef: { name: SECRET, key: password } } }
+        - { name: PGSSLMODE, value: verify-full }
+        - { name: PGSSLROOTCERT, value: /run/postgres/ca.crt }
+        - { name: PGCONNECT_TIMEOUT, value: "5" }
+      volumeMounts: [ { name: pg, mountPath: /run/postgres, readOnly: true } ]
+  volumes: [ { name: pg, secret: { secretName: SECRET, items: [ { key: ca.crt, path: ca.crt } ] } } ]
+YAML
+```
+
+```sh
+sed 's/NS/a2a/; s/SECRET/postgres-a2a/g' /tmp/psql.yaml | kubectl apply -f -
+kubectl -n a2a wait --for=jsonpath='{.status.phase}'=Succeeded pod/psql --timeout=90s
+kubectl -n a2a logs psql      # a2a | a2a | t
+kubectl -n a2a delete pod psql
+```
+
+From a namespace not in `databases`, with a copy of the Secret, every
+attempt fails with "Connection refused" and the pod ends `Failed` after
+about 30 seconds.
 
 ## Add a database
 
@@ -178,6 +236,31 @@ kubectl -n postgres annotate cluster platform --overwrite cnpg.io/hibernation=of
 The old directory brings its own roles and password hashes; delete the
 `postgres-role-*` Secrets and run `systemctl start postgres-credentials`
 so that CloudNativePG sets passwords that match the services' Secrets.
+After a re-enable, `pgdata_<timestamp>` has mode 2770, not 0700, because
+the kubelet applied the pods' fsGroup (26) to the whole volume. The
+instance manager resets the data directory's permissions before it starts
+PostgreSQL, so a directory moved back to `pgdata` still starts. Delete it
+once it is no longer needed.
+
+After the deployment, check that the CRDs are gone before enabling it
+again:
+
+```sh
+kubectl get crd | grep cnpg.io   # nothing
+```
+
+A CRD can stay `Terminating` (seen with `imagecatalogs.postgresql.cnpg.io`:
+condition `InstanceDeletionFailed`, "could not list instances: storage is
+(re)initializing"). k3s deletes the removed manifest's objects about 2
+seconds after it restarts, and the API server then did not retry the
+CRD's deletion for minutes. While a CRD is `Terminating`, enabling the
+subsystem again fails to apply the CRDs. Any update to the CRD makes the
+API server retry, and it is gone within seconds:
+
+```sh
+kubectl get crd -o name | grep cnpg.io |
+  xargs -r -I{} kubectl annotate {} --overwrite backfabric.io/touch="$(date +%s)"
+```
 
 The `Database` objects carry a finalizer that CloudNativePG removes when
 their Cluster is deleted. k3s removes `postgres-operator` before
