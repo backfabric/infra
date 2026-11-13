@@ -1,5 +1,5 @@
 ---
-status: amended by ADR 0022
+status: amended by ADR 0022 and ADR 0026
 ---
 
 # CI evaluates, the real server validates

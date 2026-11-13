@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en" class="{{ theme or 'theme-auto' }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if title %}{{ title }} · {% endif %}{{ site.name }}</title>
+<meta name="description" content="{{ description or site.description }}">
+<meta name="color-scheme" content="{{ 'dark' if theme == 'theme-dark' else 'dark light' }}">
+<meta name="theme-color" content="#12081f">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="{{ site.url }}{{ page.url }}">
+<meta property="og:title" content="{{ title or site.name }}">
+<meta property="og:description" content="{{ description or site.description }}">
+<meta property="og:url" content="{{ site.url }}{{ page.url }}">
+<meta property="og:type" content="website">
+<link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
+<link rel="preload" href="/assets/fonts/anton.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body class="{{ bodyClass }}">
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="backfabric home">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><use href="/assets/mark.svg#mark"/></svg>
+    <span>backfabric</span>
+  </a>
+  <nav aria-label="Main">
+    <ul>
+      <li><a href="/#stack">Stack</a></li>
+      <li><a href="/#status">Status</a></li>
+      <li><a href="/#start">Start</a></li>
+      <li><a href="/docs/"{% if page.url.startsWith('/docs/') %} aria-current="page"{% endif %}>Docs</a></li>
+      <li><a href="{{ site.repo }}">GitHub</a></li>
+    </ul>
+  </nav>
+</header>
+<main id="main" tabindex="-1">
+{{ content | safe }}
+</main>
+<footer class="footer">
+  <div class="footer-inner">
+    <p class="footer-brand">backfabric</p>
+    <p>Free software under the <a href="{{ site.repo }}/blob/main/LICENSE">MIT license</a>. Source, issues and pull requests on <a href="{{ site.repo }}">GitHub</a>.</p>
+    <p class="fine">This site is built from the repository by CI. No cookies, no trackers, no third-party requests. Fonts under the SIL Open Font License 1.1: <a href="/assets/fonts/anton-OFL.txt">Anton</a>, <a href="/assets/fonts/inter-OFL.txt">Inter</a>, <a href="/assets/fonts/jetbrains-mono-OFL.txt">JetBrains Mono</a>.</p>
+  </div>
+</footer>
+</body>
+</html>

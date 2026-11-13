@@ -1,3 +1,7 @@
+---
+status: amended by ADR 0026
+---
+
 # CI builds and publishes the agent image
 
 Amends ADR 0015. CI builds and publishes exactly one artifact: the agents' container image, `ghcr.io/backfabric/agent` (`packages.x86_64-linux.agent-image`, `nix/images/`). Agents run as Agent Substrate actors, and an actor's image must be pullable by the cluster, anonymously (the Substrate prototype, PR #48, gives atelet no registry credentials). The image holds no secrets, only Codex, a small supervisor and basic tools; every agent logs in to Codex at run time. So it can be public and built in this public repository, with Nix like everything else here. Everything else in CI stays evaluation only.

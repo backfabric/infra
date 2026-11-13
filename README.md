@@ -7,7 +7,7 @@ This flake is public and contains no host-specific data. Concrete hosts, IP
 addresses, and secrets live in a separate private repository that consumes
 these modules.
 
-Status: work in progress.
+Status: work in progress. Project website: <https://backfabric.dev>.
 
 ## Layout
 
@@ -43,6 +43,10 @@ requires them there for the flake to be `github:backfabric/infra`.
   (Codex and an HTTP supervisor, run as an Agent Substrate actor),
   `packages.x86_64-linux.agent-image`, built and published by CI, see
   [docs/agent-image.md](docs/agent-image.md).
+- `website/`: the project website at <https://backfabric.dev> (Eleventy),
+  generated from this README, the template's README, and `docs/`;
+  `packages.<system>.website` (`nix/website.nix`), published to GitHub
+  Pages by CI ([ADR 0026](docs/adr/0026-project-website-in-the-repository.md)).
 - `docs/`: operational runbooks:
   [the fleet dev shell and installing a host](docs/fleet-shell.md),
   [replacing a failed disk](docs/disk-replacement.md),
@@ -170,9 +174,10 @@ nix flake init -t github:backfabric/infra
 
 ## Checks
 
-CI evaluates; the only thing it builds is the agent image
-([ADR 0022](docs/adr/0022-ci-builds-the-agent-image.md)). Run the same
-checks locally with:
+CI evaluates; the only things it builds are the agent image
+([ADR 0022](docs/adr/0022-ci-builds-the-agent-image.md)) and the website
+([ADR 0026](docs/adr/0026-project-website-in-the-repository.md)). Run the
+same checks locally with:
 
 ```sh
 nix flake check --no-build --all-systems

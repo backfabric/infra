@@ -1,0 +1,48 @@
+---
+layout: base.njk
+title: Docs
+description: Runbooks and architecture decision records of backfabric, rendered from the repository.
+bodyClass: docs
+---
+<header class="docs-hero">
+  <p class="eyebrow">Documentation</p>
+  <h1>Docs</h1>
+  <p class="intro">Rendered from the repository on every change to main: the README, the template's README, the runbooks in <a href="{{ site.repo }}/tree/main/docs"><code>docs/</code></a> and the decision records in <a href="{{ site.repo }}/tree/main/docs/adr"><code>docs/adr/</code></a>.</p>
+</header>
+
+<section class="docs-block" aria-labelledby="guides">
+  <h2 id="guides">Start here</h2>
+  <ul class="doc-cards">
+    {% for doc in [repo.overview, repo.template] %}
+    <li><a class="doc-card" href="{{ doc.url }}"><span class="doc-card-title">{{ doc.title }}</span><span class="doc-card-text">{{ doc.summary }}</span></a></li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="docs-block" aria-labelledby="runbooks">
+  <h2 id="runbooks">Runbooks</h2>
+  <ul class="doc-cards">
+    {% for doc in repo.runbooks %}
+    <li><a class="doc-card" href="{{ doc.url }}"><span class="doc-card-title">{{ doc.title }}</span><span class="doc-card-text">{{ doc.summary }}</span></a></li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="docs-block" aria-labelledby="decisions">
+  <h2 id="decisions">Architecture decision records</h2>
+  <div class="table-scroll" tabindex="0">
+  <table class="adr-index">
+    <thead><tr><th scope="col">No.</th><th scope="col">Decision</th><th scope="col">Status</th></tr></thead>
+    <tbody>
+      {% for adr in repo.adrs %}
+      <tr>
+        <td class="adr-no">{{ adr.number }}</td>
+        <td><a href="{{ adr.url }}">{{ adr.title }}</a></td>
+        <td>{% if adr.status %}<span class="status-tag">{{ adr.status }}</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="note">A status appears where the record's front matter has one; records without it are in force.</p>
+</section>
