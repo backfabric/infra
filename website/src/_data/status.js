@@ -91,7 +91,7 @@ export default {
     {
       title: "Task queue with Hatchet",
       text: "Hatchet in the cluster, on the platform PostgreSQL, as the queue behind the dispatcher.",
-      links: [pr(84), issue(83)],
+      links: [pr(84), issue(83), adr("0027", "hatchet-task-queue")],
     },
   ],
   planned: [
