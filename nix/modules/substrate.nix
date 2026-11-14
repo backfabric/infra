@@ -27,9 +27,17 @@
 #     exempt from Pod Security Admission; in exchange their pods may only
 #     run the images listed below, all pinned by digest (k3s's admission
 #     policy, `backfabric.k3s.denyUnlistedImages`);
-#   - sandbox class gVisor only, egress credential injection off, ingress to
-#     actors only for `kubectl ate proxy` (the atenet-client service
-#     account), telemetry export off.
+#   - sandbox class gVisor only, ingress to actors only for `kubectl ate
+#     proxy` (the atenet-client service account), telemetry export off;
+#   - egress credential injection (ADR 0030) only while `credentials`
+#     declares one: then ate-setup deploys Substrate's Kubernetes Secrets
+#     credential provider (its cluster-wide Secret read removed by the
+#     package), and `substrate-credentials` writes each credential from its
+#     sops secret into a Secret in `agent-credentials` (a namespace that
+#     runs no pods and admits no traffic, whose declared Secrets only the
+#     provider's service account may get), and the provider's
+#     atespace→namespace policy, so that only the listed atespaces may use
+#     each one. Without credentials injection is off.
 #
 # The manifests ate-setup applies are patched in nix/packages/substrate.nix.
 {
@@ -60,6 +68,170 @@ let
   kubeconfig = "/etc/rancher/k3s/k3s.yaml";
 
   smokeNamespace = "substrate-smoke";
+
+  # Egress credential injection (ADR 0030): on only while credentials are
+  # declared.
+  inherit (package) credentialProvider;
+  injection = cfg.credentials != { };
+  credentialsNamespace = "agent-credentials";
+  # The Secret's label the provider's policy selects each credential by, and
+  # the Secret's one key.
+  credentialLabel = "backfabric.dev/credential";
+  credentialKey = "value";
+  dnsLabel = "[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?";
+
+  # The namespace of the credentials: no pods (quota 0), no traffic in or
+  # out, and `get` on exactly the declared Secrets for the provider's
+  # service account, in place of upstream's cluster-wide ClusterRole.
+  credentialsNamespaceManifest = yaml.generate "agent-credentials-namespace.yaml" {
+    apiVersion = "v1";
+    kind = "List";
+    items = [
+      {
+        apiVersion = "v1";
+        kind = "Namespace";
+        metadata.name = credentialsNamespace;
+      }
+      {
+        apiVersion = "v1";
+        kind = "ResourceQuota";
+        metadata = {
+          name = "no-pods";
+          namespace = credentialsNamespace;
+        };
+        spec.hard.pods = "0";
+      }
+      {
+        apiVersion = "networking.k8s.io/v1";
+        kind = "NetworkPolicy";
+        metadata = {
+          name = "default-deny";
+          namespace = credentialsNamespace;
+        };
+        spec = {
+          podSelector = { };
+          policyTypes = [
+            "Ingress"
+            "Egress"
+          ];
+        };
+      }
+      {
+        apiVersion = "rbac.authorization.k8s.io/v1";
+        kind = "Role";
+        metadata = {
+          name = credentialProvider.serviceAccount;
+          namespace = credentialsNamespace;
+        };
+        rules = [
+          {
+            apiGroups = [ "" ];
+            resources = [ "secrets" ];
+            resourceNames = lib.attrNames cfg.credentials;
+            verbs = [ "get" ];
+          }
+        ];
+      }
+      {
+        apiVersion = "rbac.authorization.k8s.io/v1";
+        kind = "RoleBinding";
+        metadata = {
+          name = credentialProvider.serviceAccount;
+          namespace = credentialsNamespace;
+        };
+        roleRef = {
+          apiGroup = "rbac.authorization.k8s.io";
+          kind = "Role";
+          name = credentialProvider.serviceAccount;
+        };
+        subjects = [
+          {
+            kind = "ServiceAccount";
+            name = credentialProvider.serviceAccount;
+            inherit namespace;
+          }
+        ];
+      }
+    ];
+  };
+
+  # The provider's atespace→namespace policy (cmd/credential-provider/
+  # kubernetes-secrets/nsauthz.go): one grant per credential and atespace,
+  # narrowed to that credential's Secret by its label. Default deny: an
+  # atespace not listed resolves nothing.
+  namespacePolicy.policies = lib.concatLists (
+    lib.mapAttrsToList (
+      name: c:
+      map (atespace: {
+        inherit atespace;
+        allowedNamespaces = [ credentialsNamespace ];
+        secretSelector.matchLabels.${credentialLabel} = name;
+      }) c.atespaces
+    ) cfg.credentials
+  );
+  namespacePolicyManifest = yaml.generate "credential-provider-namespace-policy.yaml" {
+    apiVersion = "v1";
+    kind = "ConfigMap";
+    metadata = {
+      name = credentialProvider.policyConfigMap;
+      inherit namespace;
+    };
+    data.${credentialProvider.policyKey} = builtins.toJSON namespacePolicy;
+  };
+
+  credentials = pkgs.writeShellApplication {
+    name = "substrate-credentials";
+    runtimeInputs = [
+      pkgs.jq
+      pkgs.coreutils
+    ];
+    text = ''
+      export KUBECONFIG=${kubeconfig}
+      kubectl() { ${k3s} kubectl "$@"; }
+      apply() { kubectl apply --server-side --force-conflicts --field-manager=substrate-credentials "$@"; }
+
+      ${shell.waitUntil}
+      ${shell.apiReady k3s}
+      exists() { kubectl get "$@" >/dev/null 2>&1; }
+
+      wait_until 300 "the k3s API with $KUBECONFIG; is k3s running? systemctl status k3s" api_ready
+      apply -f ${credentialsNamespaceManifest}
+
+      # Each credential from its sops secret, read by jq from the file: the
+      # value is never in an argument (process listings), a file of its own
+      # or the output. A trailing newline is not part of it.
+      write_credential() {
+        jq -n --arg name "$1" --rawfile value "$2" '{
+          apiVersion: "v1", kind: "Secret", type: "Opaque",
+          metadata: {name: $name, namespace: "${credentialsNamespace}", labels: {"${credentialLabel}": $name}},
+          stringData: {"${credentialKey}": ($value | rtrimstr("\n"))}
+        }' | apply -f -
+      }
+      ${lib.concatStrings (
+        lib.mapAttrsToList (name: c: ''
+          write_credential ${
+            lib.escapeShellArgs [
+              name
+              config.sops.secrets.${c.sopsSecret}.path
+            ]
+          }
+        '') cfg.credentials
+      )}
+      # Credentials no longer declared.
+      kubectl -n ${credentialsNamespace} delete secret \
+        -l ${lib.escapeShellArg "${credentialLabel},${credentialLabel} notin (${lib.concatStringsSep "," (lib.attrNames cfg.credentials)})"}
+
+      # The policy, which ate-setup creates empty and never overwrites. The
+      # provider loads it only at startup: its pods are replaced when the
+      # policy's hash in their template changes, and only then.
+      apply -f ${namespacePolicyManifest}
+      wait_until 300 "the Deployment ${namespace}/${credentialProvider.deployment}; journalctl -u substrate-install" \
+        exists -n ${namespace} deployment ${credentialProvider.deployment}
+      kubectl -n ${namespace} patch deployment ${credentialProvider.deployment} --type=merge \
+        -p '{"spec": {"template": {"metadata": {"annotations": {"backfabric.dev/namespace-policy": "${builtins.hashString "sha256" (builtins.toJSON namespacePolicy)}"}}}}}'
+      kubectl -n ${namespace} rollout status deployment ${credentialProvider.deployment} --timeout=5m
+    '';
+  };
 
   features = [
     "ClusterTrustBundle"
@@ -109,7 +281,10 @@ let
     };
     atenet = {
       dataplane = "envoy";
-      egress.credentialProvider = builtins.toJSON { enabled = false; };
+      # The bundled Kubernetes Secrets provider, only with credentials.
+      egress.credentialProvider = builtins.toJSON (
+        if injection then { name = "k8s.io"; } else { enabled = false; }
+      );
     };
     storage = {
       snapshotLocation = "s3://${bucket}/";
@@ -644,6 +819,46 @@ in
       WorkerPool namespace, and its manifests in /etc/substrate/smoke
       (docs/substrate.md)
     '';
+
+    credentials = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule (
+          { name, ... }:
+          {
+            options = {
+              sopsSecret = lib.mkOption {
+                type = lib.types.str;
+                default = name;
+                description = ''
+                  The sops secret with the value (`sops.secrets.<name>`; from
+                  `sops.defaultSopsFile` unless its `sopsFile` says
+                  otherwise).
+                '';
+              };
+              atespaces = lib.mkOption {
+                type = lib.types.nonEmptyListOf (lib.types.strMatching dnsLabel);
+                description = "The atespaces whose actors' egress policies may inject it.";
+              };
+            };
+          }
+        )
+      );
+      default = { };
+      example = {
+        openai-api-key.atespaces = [ "agents" ];
+      };
+      description = ''
+        Credentials Agent Substrate's egress gateway injects into actors'
+        requests (ADR 0030), by name. Each becomes the Secret
+        `${credentialsNamespace}/<name>` with the key `${credentialKey}`, at
+        every deployment and whenever its sops secret changes, and an egress
+        policy names it as
+        `ate-secret://k8s.io/default/${credentialsNamespace}/<name>/${credentialKey}`.
+        Only actors of the listed atespaces may use it. Declaring any turns
+        egress credential injection on (`k8s.io` provider); none keeps it
+        off. See docs/substrate.md.
+      '';
+    };
   };
 
   # Disabled: k3s removes what the manifests applied (docs/substrate.md,
@@ -660,11 +875,21 @@ in
             ] == [ ];
           message = "backfabric.substrate.workerPoolNamespaces must not contain kube-system or ${namespace}";
         }
+        {
+          assertion = lib.all (n: builtins.match dnsLabel n != null) (lib.attrNames cfg.credentials);
+          message = "backfabric.substrate.credentials: names must be DNS labels (lowercase letters, digits, `-`)";
+        }
       ];
 
-      sops.secrets = lib.genAttrs [ "rustfs-access-key" "rustfs-secret-key" ] (_: {
-        sopsFile = config.backfabric.secrets.commonFile;
-      });
+      sops.secrets = lib.mkMerge [
+        (lib.genAttrs [ "rustfs-access-key" "rustfs-secret-key" ] (_: {
+          sopsFile = config.backfabric.secrets.commonFile;
+        }))
+        # A changed value is written again.
+        (lib.genAttrs (lib.unique (lib.mapAttrsToList (_: c: c.sopsSecret) cfg.credentials)) (_: {
+          restartUnits = [ "substrate-credentials.service" ];
+        }))
+      ];
 
       # The Secret RustFS, its bucket Job and Substrate's objectstore-plugin
       # sidecars read, rendered by sops-nix into /run/secrets/rendered (a
@@ -706,11 +931,14 @@ in
         # other ate-system workloads set no seccomp profile either.
         # The images: what ate-setup deploys there (checked against the
         # patched manifests when the package is built), RustFS and its bucket
-        # Job.
-        ${namespace}.images = package.systemImages ++ [
-          images.rustfs
-          images.awsCli
-        ];
+        # Job, and with credentials the credential provider.
+        ${namespace}.images =
+          package.systemImages
+          ++ [
+            images.rustfs
+            images.awsCli
+          ]
+          ++ lib.optional injection credentialProvider.image;
       }
       # Worker pods, created by ate-controller in a WorkerPool's
       # namespace: root, the host path /var/lib/ate, SYS_ADMIN, NET_ADMIN
@@ -763,6 +991,26 @@ in
           StateDirectory = "substrate-install";
           StateDirectoryMode = "0700";
           PrivateTmp = true;
+        };
+      };
+
+      # Runs at every deployment (as postgres-credentials), at boot, when a
+      # credential's sops secret changes (restartUnits), and again after
+      # each run of substrate-install (Requires), which may have redeployed
+      # the provider. No Restart=: waits for what it needs for a bounded
+      # time and then fails, so that a deployment reports it.
+      systemd.services.substrate-credentials = lib.mkIf injection {
+        description = "Write Agent Substrate's egress credentials and the provider's policy";
+        wantedBy = [ "multi-user.target" ];
+        requires = [ "substrate-install.service" ];
+        after = [
+          "k3s.service"
+          "substrate-install.service"
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = lib.getExe credentials;
+          TimeoutStartSec = "15min";
         };
       };
 

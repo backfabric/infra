@@ -186,7 +186,12 @@ nix flake init -t github:backfabric/infra
   snapshots in `ate-system` on static local volumes in `/var/lib/substrate`,
   and `kubectl ate` on the host. `ate-system` and the namespaces of
   `workerPoolNamespaces` are exempt from Pod Security; their pods may only
-  run digest-pinned images. See [docs/substrate.md](docs/substrate.md).
+  run digest-pinned images. Egress credential injection
+  ([ADR 0030](docs/adr/0030-egress-injected-model-keys.md)) only for the
+  `credentials` declared: each from sops into a Secret in
+  `agent-credentials`, which only Substrate's credential provider reads and
+  only the listed atespaces may use, so agents reach their model with a key
+  they never hold. See [docs/substrate.md](docs/substrate.md).
 - `postgres` (off by default): a PostgreSQL for platform services in the
   cluster, run by [CloudNativePG](https://cloudnative-pg.io/)
   ([ADR 0025](docs/adr/0025-platform-postgres-with-cloudnativepg.md)) from

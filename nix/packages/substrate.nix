@@ -55,6 +55,10 @@ let
     # for ${ENVOY_DATAPLANE_IMAGE} (steps/overlay.go).
     envoy-dataplane = "sha256:fc8e4c3ee9060a01153e4d4af571f3db294e60d536422e8a8c2996fa4a72bf8b";
     ateworker-gvisor = "sha256:f8987236c6256f58c4b2625e543b43f4ae4bdded6ee6821c03d966effb7c0f17";
+    # The bundled Kubernetes Secrets credential provider
+    # (cmd/credential-provider/kubernetes-secrets), which ate-setup deploys
+    # only with egress credential injection on.
+    kubernetes-secrets = "sha256:21d494e2461d920bb03a66a0cdf574835c7d2e019b7941acef675ecff5702344";
   };
   image = name: "${imageRepo}/${name}:${imageTag}@${imageDigests.${name}}";
 
@@ -76,6 +80,22 @@ let
     ++ [
       "postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"
     ];
+
+  # The bundled credential provider of egress credential injection, as
+  # ate-setup deploys it from manifests/egress-credential-injection when the
+  # install selects `k8s.io` (cmd/ate-setup/internal/steps/credprovider.go):
+  # its image and the names nix/modules/substrate.nix relies on, checked
+  # against the manifests below.
+  credentialProvider = {
+    image = image "kubernetes-secrets";
+    serviceAccount = "k8s-credential-provider";
+    deployment = "k8s-credential-provider";
+    # The atespace→namespace policy the provider loads at startup.
+    policyConfigMap = "k8s-credential-provider-namespace-policy";
+    policyKey = "namespace-policy.yaml";
+    # Upstream's cluster-wide Secret read, removed below.
+    secretReader = "k8s-credential-provider-secret-reader";
+  };
 
   # The in-cluster RustFS, deployed by nix/modules/substrate.nix from these
   # names: its Service, the Secret with its credentials (in the namespace of
@@ -350,38 +370,62 @@ let
         yq -i '(select(.kind == "Deployment") | .spec.template.spec.securityContext.seccompProfile.type) = "RuntimeDefault"' \
           $install/pod-certificate-controller.yaml
 
-        # systemImages is exactly what the patched manifests of ate-system's
-        # pods produce once ate-setup has resolved them: ko://<module>/cmd/<name>
-        # and ''${ENVOY_DATAPLANE_IMAGE} become <repo>/<name>:<tag>@<digest>,
+        # The bundled credential provider reads Secrets in every namespace
+        # (ClusterRole and ClusterRoleBinding k8s-credential-provider-secret-reader,
+        # which upstream calls a POC scope). Both go: nix/modules/substrate.nix
+        # grants its service account `get` on Secrets in the one namespace
+        # that holds the credentials. The names the module relies on are
+        # checked.
+        credprovider=$out/manifests/egress-credential-injection
+        [[ $(yq ea -N '[select(.kind == "ClusterRole" or .kind == "ClusterRoleBinding") | .kind + "/" + .metadata.name] | join(" ")' \
+          $credprovider/k8s-credential-provider.yaml) == "ClusterRole/${credentialProvider.secretReader} ClusterRoleBinding/${credentialProvider.secretReader}" ]]
+        yq -i 'select(.kind != "ClusterRole" and .kind != "ClusterRoleBinding")' \
+          $credprovider/k8s-credential-provider.yaml
+        [[ $(yq ea -N '[select(.kind == "ServiceAccount" or .kind == "Deployment") | .kind + "/" + .metadata.name] | join(" ")' \
+          $credprovider/k8s-credential-provider.yaml) == "ServiceAccount/${credentialProvider.serviceAccount} Deployment/${credentialProvider.deployment}" ]]
+        [[ $(yq '.metadata.name + " " + (.data | keys | join(" "))' $credprovider/namespace-policy.yaml) == "${credentialProvider.policyConfigMap} ${credentialProvider.policyKey}" ]]
+
+        # The images the pods of the manifests on stdin run once ate-setup
+        # has resolved them: ko://<module>/cmd/<name> and
+        # ''${ENVOY_DATAPLANE_IMAGE} become <repo>/<name>:<tag>@<digest>,
         # other references stay as written.
+        images() {
+          yq ea -N '.. | select(tag == "!!map" and has("image")) | .image' |
+            while read -r ref; do
+              case $ref in
+                ko://go.ate.dev/substrate/*) name=''${ref##*/} ;;
+                '${"$"}{ENVOY_DATAPLANE_IMAGE}') name=envoy-dataplane ;;
+                *) echo "$ref"; continue ;;
+              esac
+              digest=$(name=$name yq -e '.[strenv(name)]' $imageDigestsPath) || {
+                echo "no pinned digest for $name ($ref)" >&2
+                exit 1
+              }
+              echo "${imageRepo}/$name:${imageTag}@$digest"
+            done | sort -u
+        }
+
+        # systemImages is exactly what the patched manifests of ate-system's
+        # pods produce, and credentialProvider.image what the provider's
+        # does.
         {
           kustomize build --load-restrictor LoadRestrictionsNone $install/base
           echo ---
           cat $install/atenet-egress.yaml
           echo ---
           cat $install/postgres/postgres.yaml
-        } | yq ea -N '.. | select(tag == "!!map" and has("image")) | .image' |
-          while read -r ref; do
-            case $ref in
-              ko://go.ate.dev/substrate/*) name=''${ref##*/} ;;
-              '${"$"}{ENVOY_DATAPLANE_IMAGE}') name=envoy-dataplane ;;
-              *) echo "$ref"; continue ;;
-            esac
-            digest=$(name=$name yq -e '.[strenv(name)]' $imageDigestsPath) || {
-              echo "no pinned digest for $name ($ref)" >&2
-              exit 1
-            }
-            echo "${imageRepo}/$name:${imageTag}@$digest"
-          done | sort -u >images
-        sort -u $systemImagesPath | diff -u - images
+        } | images >system-images
+        sort -u $systemImagesPath | diff -u - system-images
+        images <$credprovider/k8s-credential-provider.yaml >provider-images
+        echo ${credentialProvider.image} | diff -u - provider-images
 
         # Every object ate-setup applies for this install (deploy ate-system:
-        # non-kind, envoy, gVisor only, no CSI, Cloud SQL or credential
-        # provider; cmd/ate-setup/internal/steps) must be of an API group the
-        # cluster serves without anything else installed: Kubernetes' own
-        # ("" and apps, batch, autoscaling, policy, *.k8s.io) or a group of
-        # a CRD in the tree. A resource of another group (a cloud provider's
-        # CRD) fails here instead of in the install.
+        # non-kind, envoy, gVisor only, no CSI or Cloud SQL, with or without
+        # the credential provider; cmd/ate-setup/internal/steps) must be of an
+        # API group the cluster serves without anything else installed:
+        # Kubernetes' own ("" and apps, batch, autoscaling, policy, *.k8s.io)
+        # or a group of a CRD in the tree. A resource of another group (a
+        # cloud provider's CRD) fails here instead of in the install.
         applied=(
           ate-system-namespace.yaml
           generated/ate.dev_csidriverconfigs.yaml
@@ -394,6 +438,8 @@ let
           ate-otel-config.yaml
           postgres/postgres.yaml
           atenet-egress.yaml
+          ../egress-credential-injection/namespace-policy.yaml
+          ../egress-credential-injection/k8s-credential-provider.yaml
         )
         {
           kustomize build --load-restrictor LoadRestrictionsNone $install/base
@@ -424,6 +470,7 @@ in
 ateSetup.overrideAttrs (old: {
   passthru = (old.passthru or { }) // {
     inherit
+      credentialProvider
       manifests
       namespace
       rustfs

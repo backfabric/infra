@@ -61,11 +61,14 @@
 
   # Agent Substrate on the cluster (docs/substrate.md), its RustFS
   # credentials from `secrets/common.yaml`: WorkerPools in the namespace
-  # `agents`, and the smoke test.
+  # `agents`, the smoke test, and an OpenAI API key (`openai-api-key` in the
+  # host's sops file) that the egress gateway injects for actors of the
+  # atespace `agents`.
   backfabric.substrate = {
     enable = true;
     workerPoolNamespaces = [ "agents" ];
     smokeTest.enable = true;
+    credentials.openai-api-key.atespaces = [ "agents" ];
   };
 
   # The platform PostgreSQL with one database, whose credentials go to the

@@ -1,3 +1,7 @@
+---
+status: amended by ADR 0030
+---
+
 # Agent Substrate as the agent runtime
 
 Agents run as [Agent Substrate](https://github.com/agent-substrate/substrate) actors (release v1.0.0): each agent is a long-lived actor in a gVisor sandbox on a warm worker pod, suspended to a snapshot between tasks and resumed on the next request, with its memory, root file system and durable volumes. Substrate gives per-actor identity, ingress through one router, and per-actor egress policy (TLS passthrough or interception by host name), which is what agents need and what we would otherwise build. The `substrate` subsystem installs it on the cluster (`nix/modules/substrate.nix`, runbook docs/substrate.md).
