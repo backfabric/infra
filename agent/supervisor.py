@@ -2,9 +2,9 @@
 
 One actor is one agent session. The first message starts a Codex session,
 every later message resumes it, one task at a time; the actor serves only the
-contextId of its first message. Codex reaches the model with the user's
-ChatGPT subscription, logged in once per actor through `POST /login` (device
-code), outside A2A.
+contextId of its first message. Codex reaches the OpenAI API with
+AGENT_OPENAI_API_KEY, a placeholder that Agent Substrate's egress gateway
+replaces with the real key (ADR 0030): the actor never holds it.
 
 There is no authentication: the actor is reachable only through Agent
 Substrate's router, which decides who may call it. Tasks are kept in memory:
@@ -16,12 +16,10 @@ import asyncio
 import contextlib
 import json
 import os
-import re
 import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 
 import uvicorn
@@ -38,7 +36,6 @@ from a2a.types import (
     InvalidParamsError,
     Part,
     Task,
-    TaskNotFoundError,
     TaskState,
     TaskStatus,
     UnsupportedOperationError,
@@ -54,18 +51,32 @@ CODEX_HOME = os.environ["CODEX_HOME"]
 WORKDIR = os.path.join(HOME, "work")
 SESSION_FILE = os.path.join(HOME, "codex-session")  # Codex's session id
 CONTEXT_FILE = os.path.join(HOME, "a2a-context")  # the contextId served
+CONFIG_FILE = os.path.join(CODEX_HOME, "config.toml")
+API_KEY_ENV = "AGENT_OPENAI_API_KEY"
 TASK_TIMEOUT = int(os.environ.get("AGENT_TASK_TIMEOUT", "3600"))
-LOGIN_PROMPT_TIMEOUT = 30
 TAIL_BYTES = 4000
 # One --json event per line; a command's output can make one long.
 EVENT_LINE_LIMIT = 64 * 1024 * 1024
 
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
-URL = re.compile(r"https://\S+")
-USER_CODE = re.compile(r"^\s*([A-Z0-9]+-[A-Z0-9]+)\s*$", re.MULTILINE)
+# Codex's configuration, owned by the supervisor: written at every start.
+CONFIG = f"""# Written by the agent supervisor at every start (docs/agent-image.md).
+model_provider = "openai-api"
 
-login_lock = threading.Lock()
-login = None  # the last `codex login --device-auth`, see start_login
+[features]
+# Fail a turn after Codex's 5 retries when the API is unreachable, instead
+# of retrying until AGENT_TASK_TIMEOUT.
+unbounded_connection_retries = false
+
+# Not the built-in `openai` provider: that one opens a WebSocket first, which
+# Substrate's egress gateway refuses with 403. This one uses HTTPS only and
+# sends ${API_KEY_ENV} as `Authorization: Bearer`.
+[model_providers.openai-api]
+name = "OpenAI API"
+base_url = "https://api.openai.com/v1"
+wire_api = "responses"
+env_key = "{API_KEY_ENV}"
+supports_websockets = false
+"""
 
 
 def tail(text):
@@ -85,73 +96,25 @@ def read_record(path):
         return f.read().strip() or None
 
 
-def write_record(path, value):
+def write_file(path, text):
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
-        f.write(value + "\n")
+        f.write(text)
     os.replace(tmp, path)
 
 
-# Login: the device-code flow with the user's ChatGPT subscription, an
-# operator action outside A2A.
+def write_record(path, value):
+    write_file(path, value + "\n")
 
 
-def start_login():
-    """Starts a device-code login, or returns the one still running.
-
-    Returns once Codex has printed the verification URL and the user code
-    (or has exited); the login then completes in the background when the
-    user enters the code.
-    """
-    global login
-    with login_lock:
-        if login is not None and login["exit_code"] is None:
-            return login
-        proc = subprocess.Popen(
-            ["codex", "login", "--device-auth"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        state = {
-            "url": None,
-            "code": None,
-            "output": "",
-            "exit_code": None,
-            "prompted": threading.Event(),
-        }
-
-        def follow():
-            for line in proc.stdout:
-                state["output"] = tail(state["output"] + ANSI.sub("", line))
-                if state["url"] is None and (m := URL.search(state["output"])):
-                    state["url"] = m.group(0)
-                if state["code"] is None and (m := USER_CODE.search(state["output"])):
-                    state["code"] = m.group(1)
-                if state["url"] and state["code"]:
-                    state["prompted"].set()
-            state["exit_code"] = proc.wait()
-            state["prompted"].set()
-
-        threading.Thread(target=follow, daemon=True).start()
-        login = state
-    state["prompted"].wait(LOGIN_PROMPT_TIMEOUT)
-    return state
-
-
-def login_status():
-    result = subprocess.run(
-        ["codex", "login", "status"],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-    )
-    return {
-        "logged_in": result.returncode == 0,
-        "status": (result.stdout + result.stderr).strip(),
-        "login_running": login is not None and login["exit_code"] is None,
-    }
+def write_config():
+    """Writes Codex's configuration, unless it is already the supervisor's."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            if f.read() == CONFIG:
+                return
+    write_file(CONFIG_FILE, CONFIG)
+    log(msg="wrote config", path=CONFIG_FILE)
 
 
 # Codex: one session per actor.
@@ -169,17 +132,13 @@ async def run_codex(prompt):
     with tempfile.TemporaryDirectory() as tmp:
         last = os.path.join(tmp, "last-message.txt")
         # The actor is the sandbox (gVisor), so Codex runs commands without
-        # its own sandbox and never asks for approval. By default Codex
-        # retries an unreachable backend until it is killed; without the
-        # feature a turn fails after its 5 retries. The options of `exec`
+        # its own sandbox and never asks for approval. The options of `exec`
         # come before `resume`, which takes only the session and the prompt.
         command = [
             "codex",
             "exec",
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",
-            "--disable",
-            "unbounded_connection_retries",
             "--color",
             "never",
             "--cd",
@@ -281,33 +240,19 @@ class CodexExecutor(AgentExecutor):
                 [Part(text=text)], metadata={"error": error} if error else None
             )
 
-        status = await asyncio.to_thread(login_status)
+        # The first event is the task itself. A message can name only a
+        # new task: the SDK rejects one for an ended task, and the handler
+        # one while a task runs.
         state = TaskState.TASK_STATE_WORKING
-        message = None
-        if not status["logged_in"]:
-            state = TaskState.TASK_STATE_AUTH_REQUIRED
-            message = agent_message(
-                f"Codex is not logged in to ChatGPT ({status['status']}). "
-                "An operator logs the agent in (POST /login, docs/agent-image.md); "
-                "then send the message again.",
-                "needs_login",
+        await event_queue.enqueue_event(
+            Task(
+                id=task_id,
+                context_id=context_id,
+                status=TaskStatus(state=state),
+                history=[context.message],
             )
-        if context.current_task is None:
-            # A new task: the first event is the task itself.
-            await event_queue.enqueue_event(
-                Task(
-                    id=task_id,
-                    context_id=context_id,
-                    status=TaskStatus(state=state, message=message),
-                    history=[context.message],
-                )
-            )
-        else:
-            # A further message to a task waiting for the login.
-            await updater.update_status(state, message=message)
+        )
         log(msg="task", task=task_id, context=context_id, state=TaskState.Name(state))
-        if state == TaskState.TASK_STATE_AUTH_REQUIRED:
-            return
 
         result = await run_codex(context.get_user_input())
         log(
@@ -345,13 +290,6 @@ class RequestHandler(DefaultRequestHandler):
                 "it takes one task at a time"
             )
         message = params.message
-        if message.task_id and not message.context_id:
-            # A follow-up may name only its task; A2A infers the context from
-            # it, which the SDK's handler does not (it would generate one).
-            task = await self.task_store.get(message.task_id, context)
-            if task is None:
-                raise TaskNotFoundError(message=f"task {message.task_id} not found")
-            message.context_id = task.context_id
         served = read_record(CONTEXT_FILE)
         if served and message.context_id != served:
             raise InvalidParamsError(
@@ -409,27 +347,9 @@ def app(card):
     async def healthz(request):
         return JSONResponse({"ok": True})
 
-    async def get_login(request):
-        return JSONResponse(await asyncio.to_thread(login_status))
-
-    async def post_login(request):
-        state = await asyncio.to_thread(start_login)
-        if state["url"] and state["code"]:
-            return JSONResponse({"verification_url": state["url"], "user_code": state["code"]})
-        return JSONResponse(
-            {
-                "error": "codex printed no verification URL and code",
-                "exit_code": state["exit_code"],
-                "output_tail": state["output"],
-            },
-            status_code=502,
-        )
-
     routes = [
         Route(AGENT_CARD_WELL_KNOWN_PATH, serve_card, methods=["GET"]),
         Route("/healthz", healthz, methods=["GET"]),
-        Route("/login", get_login, methods=["GET"]),
-        Route("/login", post_login, methods=["POST"]),
         *create_jsonrpc_routes(handler, rpc_url="/"),
     ]
 
@@ -471,10 +391,19 @@ class RequestLog:
 
 
 if __name__ == "__main__":
+    if not os.environ.get(API_KEY_ENV, "").strip():
+        # Codex would fail every task with a missing-key error; say so once.
+        log(
+            msg=f"{API_KEY_ENV} is not set: set it to a placeholder the egress "
+            "gateway replaces with the OpenAI API key (docs/agent-image.md)",
+            error="no_api_key",
+        )
+        sys.exit(1)
     # Both may be on an empty volume mounted at HOME; Codex needs CODEX_HOME
     # to exist.
     os.makedirs(CODEX_HOME, mode=0o700, exist_ok=True)
     os.makedirs(WORKDIR, exist_ok=True)
+    write_config()
     version = subprocess.run(
         ["codex", "--version"], capture_output=True, text=True, check=True
     ).stdout.split()[-1]

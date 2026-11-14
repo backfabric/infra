@@ -40,26 +40,69 @@ jobs:
           nix build .#packages.x86_64-linux.agent-image
           # The compressed size of the image, its layers' total.
           du --apparent-size --block-size=1M --dereference result
-      # The supervisor starts as the agent user and answers A2A; Codex runs.
-      # Nothing here talks to OpenAI: without a login a message ends in
-      # auth-required before Codex runs.
+      # The supervisor starts as the agent user and answers A2A; Codex runs
+      # with the configuration the supervisor wrote. The container has no
+      # network, so nothing here talks to OpenAI: a message fails once
+      # Codex's 5 retries are used up, and is continued by the next one.
       - name: Run image
         run: |
           image=$(docker load <result | sed -n 's/^Loaded image: //p')
           docker image inspect --format '{{json .Config}}' "$image"
-          docker run --detach --name agent --publish 8080:8080 "$image"
+          # Without a key the supervisor does not start.
+          if timeout 60 docker run --rm --network none "$image" >no-key.log; then exit 1; fi
+          jq --exit-status 'select(.error == "no_api_key")' no-key.log
+          docker run --detach --name agent --network none \
+            --env AGENT_OPENAI_API_KEY=injected-by-egress "$image"
           trap 'docker logs agent' EXIT
-          # Until the supervisor listens, docker's proxy resets connections.
-          curl --silent --show-error --fail --retry 10 --retry-all-errors --retry-delay 1 localhost:8080/healthz
-          curl --silent --show-error --fail localhost:8080/login | tee login.json
-          jq --exit-status '.logged_in == false and .status == "Not logged in"' login.json
-          curl --silent --show-error --fail localhost:8080/.well-known/agent-card.json | tee card.json
-          jq --exit-status '.supportedInterfaces[0].protocolBinding == "JSONRPC" and .supportedInterfaces[0].protocolVersion == "1.0"' card.json
-          curl --silent --show-error --fail localhost:8080/ \
-            --header 'Content-Type: application/json' --header 'A2A-Version: 1.0' \
-            --data '{"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {"message": {"role": "ROLE_USER", "messageId": "m1", "contextId": "c1", "parts": [{"text": "Say hello"}]}}}' |
-            tee send.json
-          jq --exit-status '.result.task.status.state == "TASK_STATE_AUTH_REQUIRED"' send.json
+          # HTTP from inside the container, the network being closed:
+          # request <method> <path> [<body>] prints {"status", "body"}.
+          request() {
+            docker exec agent python3 -c '
+          import json, sys, urllib.error, urllib.request
+          body = sys.argv[3].encode() if len(sys.argv) > 3 else None
+          headers = {"Content-Type": "application/json", "A2A-Version": "1.0"}
+          req = urllib.request.Request("http://127.0.0.1:8080" + sys.argv[2], body, headers, method=sys.argv[1])
+          try:
+              with urllib.request.urlopen(req, timeout=300) as response:
+                  status, text = response.status, response.read()
+          except urllib.error.HTTPError as error:
+              status, text = error.code, error.read()
+          try:
+              body = json.loads(text)
+          except ValueError:
+              body = text.decode()
+          print(json.dumps({"status": status, "body": body}))
+          ' "$@"
+          }
+          send() {  # <messageId> <text>
+            request POST / '{"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {"message": {"role": "ROLE_USER", "messageId": "'"$1"'", "contextId": "c1", "parts": [{"text": "'"$2"'"}]}}}'
+          }
+          for _ in $(seq 30); do request GET /healthz >/dev/null 2>&1 && break; sleep 1; done
+          request GET /healthz | jq --exit-status '.body.ok'
+          request GET /.well-known/agent-card.json | tee card.json
+          jq --exit-status '.body.supportedInterfaces[0].protocolBinding == "JSONRPC" and .body.supportedInterfaces[0].protocolVersion == "1.0"' card.json
+          # No login: the ChatGPT device login is gone.
+          request GET /login | jq --exit-status '.status == 404'
+          request POST /login | jq --exit-status '.status == 404'
+          # Codex loads the configuration the supervisor wrote.
+          docker exec agent sh -c 'cat "$CODEX_HOME/config.toml"'
+          docker exec agent codex features list | grep -E '^unbounded_connection_retries +stable +false$'
+          # A message fails as a task, with the connection error, within the
+          # retries rather than AGENT_TASK_TIMEOUT.
+          started=$SECONDS
+          send m1 'Say hello' | tee send.json
+          echo "took $((SECONDS - started)) s"
+          ((SECONDS - started < 60))
+          jq --exit-status '.body.result.task.status | .state == "TASK_STATE_FAILED" and .message.metadata.error == "codex_failed" and (.message.parts[0].text | contains("Connection failed"))' send.json
+          # The session uses the configured provider; the next message
+          # continues it: the same session, one rollout.
+          session=$(docker exec agent cat /home/agent/codex-session)
+          send m2 'What did I ask?' | jq --exit-status '.body.result.task.status.state == "TASK_STATE_FAILED"'
+          docker exec agent cat /home/agent/codex-session | grep --line-regexp "$session"
+          docker exec agent sh -c 'ls "$CODEX_HOME"/sessions/*/*/*/rollout-*.jsonl' | tee rollouts.txt
+          test "$(wc -l <rollouts.txt)" -eq 1
+          docker exec agent sh -c 'head -n 1 "$CODEX_HOME"/sessions/*/*/*/rollout-*.jsonl' |
+            jq --exit-status --arg session "$session" '.payload | {id, model_provider} | ., . == {id: $session, model_provider: "openai-api"}'
           docker exec agent sh -c 'id && codex --version && git --version'
 
   publish:
