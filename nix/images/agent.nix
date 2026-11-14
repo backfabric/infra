@@ -1,8 +1,8 @@
 # The container image of an agent, ghcr.io/backfabric/agent: Codex behind
 # the A2A supervisor (agent/supervisor.py), run as an Agent Substrate actor.
 # Built and published by .github/workflows/agent-image.yml; see
-# docs/agent-image.md. Contains no secrets: each actor logs in to Codex at
-# run time.
+# docs/agent-image.md. Contains no secrets: Codex reaches the OpenAI API with
+# a placeholder key that Agent Substrate's egress gateway replaces (ADR 0030).
 {
   lib,
   dockerTools,
@@ -119,10 +119,13 @@ dockerTools.buildLayeredImage {
     Env = [
       "PATH=/bin"
       "HOME=${home}"
-      # Codex's login (auth.json), configuration and sessions: the home
-      # directory is the agent's state, see docs/agent-image.md.
+      # Codex's configuration (written by the supervisor) and sessions: the
+      # home directory is the agent's state, see docs/agent-image.md.
       "CODEX_HOME=${home}/.codex"
       "SSL_CERT_FILE=${cacert}/etc/ssl/certs/ca-bundle.crt"
+      # Not here: AGENT_OPENAI_API_KEY and CODEX_CA_CERTIFICATE, set by the
+      # ActorTemplate (docs/agent-image.md); without the key the supervisor
+      # does not start.
     ];
     # Links the package to the repository at its first push.
     Labels = {

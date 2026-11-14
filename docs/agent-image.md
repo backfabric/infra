@@ -6,8 +6,11 @@ actor per agent session (one [A2A](https://a2a-protocol.org/) context),
 suspended between tasks and resumed when a request arrives. It serves A2A
 1.0. It is built with Nix (`nix/images/agent.nix`,
 `packages.x86_64-linux.agent-image`) and published by CI
-([ADR 0022](adr/0022-ci-builds-the-agent-image.md)). It contains no secrets:
-each agent logs in to Codex with the user's ChatGPT subscription at run time.
+([ADR 0022](adr/0022-ci-builds-the-agent-image.md)). It contains no secrets,
+and neither does the actor: Codex reaches the OpenAI API with a placeholder
+key that Substrate's egress gateway replaces with the real one
+([model access](#model-access),
+[ADR 0030](adr/0030-egress-injected-model-keys.md)).
 
 ## Contents
 
@@ -42,19 +45,111 @@ ActorTemplate and the clients must name 8080:
 
 ### State
 
-The home directory is the agent's state: Codex's login (`auth.json`),
-configuration and sessions in `/home/agent/.codex`, the id of the actor's
-Codex session in `/home/agent/codex-session`, the contextId it serves in
+The home directory is the agent's state: Codex's configuration and sessions
+in `/home/agent/.codex`, the id of the actor's Codex session in
+`/home/agent/codex-session`, the contextId it serves in
 `/home/agent/a2a-context`, the tasks' working directory `/home/agent/work`.
 Snapshots of fidelity `SNAPSHOT_FIDELITY_MEMORY` or `ROOTFS` keep it across
 a suspend; mount a `durableDir` volume at `/home/agent` so it also survives
-a restore of volumes only. The snapshots therefore hold the agent's Codex
-login: whoever can read the snapshot storage can use the subscription.
+a restore of volumes only. The snapshots hold the conversation and its
+files, but no credential: the actor has only the placeholder.
 
 The A2A tasks are kept in memory only: a restore of volumes only, or a
 restart, forgets them, not the session. The caller (the platform's
 dispatcher) holds the canonical record of every message, task and artifact;
 the actor is its working copy.
+
+## Model access
+
+Codex sends its requests to `https://api.openai.com/v1` (the Responses API)
+with `Authorization: Bearer <AGENT_OPENAI_API_KEY>`, a placeholder.
+Substrate's egress gateway terminates the actor's TLS for `api.openai.com`,
+replaces the header with the real OpenAI API key from a Kubernetes Secret,
+and sends the request on
+([egress credential injection](https://github.com/agent-substrate/substrate/blob/v1.0.0/docs/guides/egress-credential-injection.md)).
+The key never enters the actor, its environment or its snapshots, and no
+one logs an actor in. The gateway's credential provider, the Secret and
+agent-0's ActorTemplate and EgressPolicy: [Agent Substrate](substrate.md).
+Why an API key and not the ChatGPT subscription:
+[ADR 0030](adr/0030-egress-injected-model-keys.md).
+
+The ActorTemplate sets (the image sets neither):
+
+| Variable | Value |
+| -------- | ----- |
+| `AGENT_OPENAI_API_KEY` | A placeholder, e.g. `injected-by-egress`; Codex sends it as the bearer token. Required: without it, or empty, the supervisor logs `{"error": "no_api_key", ...}` and exits 1. |
+| `CODEX_CA_CERTIFICATE` | `/run/ate/egress-trust-bundle/trust-bundle.pem`: Codex's own variable for the CA bundle it trusts, here the gateway's CA and the public roots from a `systemInfo` volume. Other tools keep the image's `SSL_CERT_FILE`: only Codex's traffic is intercepted. |
+
+```yaml
+containers:
+- name: agent
+  image: ghcr.io/backfabric/agent@sha256:<digest>
+  env:
+  - name: AGENT_OPENAI_API_KEY
+    value: injected-by-egress
+  - name: CODEX_CA_CERTIFICATE
+    value: /run/ate/egress-trust-bundle/trust-bundle.pem
+  volumeMounts:
+  - name: system-info
+    mountPath: /run/ate/egress-trust-bundle
+volumes:
+- name: system-info
+  systemInfo:
+    dataSources:
+    - trustBundle:
+        names:
+        - egress-mitm.ate.dev   # the egress gateway's CA
+        - system-roots.ate.dev  # public roots
+        path: trust-bundle.pem
+```
+
+The actor's EgressPolicy rule, with the key under `<key>` in the Secret
+`<secret>` of namespace `<namespace>` (`default` is the only locator of
+Substrate's Kubernetes Secrets provider; [Agent Substrate](substrate.md)
+names the ones the `substrate` subsystem creates):
+
+```yaml
+rules:
+- https:
+    hostnames: ["api.openai.com"]
+    effects:
+      replaceHeaders:
+      - header: Authorization
+        prefix: "Bearer "
+        credentialUri: ate-secret://k8s.io/default/<namespace>/<secret>/<key>
+```
+
+At every start the supervisor writes `/home/agent/.codex/config.toml` (only
+when it differs; the file is the supervisor's, edits are overwritten):
+
+```toml
+model_provider = "openai-api"
+
+[features]
+unbounded_connection_retries = false
+
+[model_providers.openai-api]
+name = "OpenAI API"
+base_url = "https://api.openai.com/v1"
+wire_api = "responses"
+env_key = "AGENT_OPENAI_API_KEY"
+supports_websockets = false
+```
+
+- A custom provider, not Codex's built-in `openai` with `CODEX_API_KEY`: the
+  built-in provider opens a Responses WebSocket first and falls back to
+  HTTPS only on `426 Upgrade Required`, while the egress gateway refuses
+  every WebSocket upgrade with `403`
+  ([egress traffic](https://github.com/agent-substrate/substrate/blob/v1.0.0/docs/guides/egress-traffic.md)),
+  and built-in providers cannot be overridden. The custom provider speaks
+  HTTPS only (`supports_websockets = false`) and sends `env_key`'s value as
+  the bearer token; Codex does not check the key itself.
+- `unbounded_connection_retries = false`: by default Codex retries an
+  unreachable API until the task is killed (`AGENT_TASK_TIMEOUT`); without
+  it a turn fails after Codex's 5 retries, so a missing egress rule or a
+  gateway outage is a `codex_failed` (`Connection failed: ...`) within
+  about half a minute.
+- Codex's default model; there is no override.
 
 ## Supervisor API
 
@@ -67,12 +162,6 @@ and every Codex turn (session, error).
 | `GET /.well-known/agent-card.json` | The A2A agent card: one JSON-RPC interface, A2A 1.0, at the URL the card was fetched from; no streaming, no push notifications; text in and out. |
 | `POST /` | A2A 1.0 JSON-RPC: `SendMessage`, `GetTask`, `CancelTask`. Requests carry the header `A2A-Version: 1.0`; without it the SDK assumes 0.3 and answers `VersionNotSupportedError`. |
 | `GET /healthz` | 200 `{"ok": true}` |
-| `POST /login` | Starts `codex login --device-auth` and returns as soon as Codex prints the code: 200 `{"verification_url", "user_code"}`. Open the URL, enter the code; the login completes in the background. While it runs, another `POST /login` returns the same code. 502 with Codex's output if it printed none within 30 seconds. |
-| `GET /login` | 200 `{"logged_in", "status", "login_running"}` from `codex login status` |
-
-`/login` is not A2A: logging an agent in to the ChatGPT subscription is an
-operator action, done once per actor through `kubectl ate proxy`, never by a
-caller of the agent.
 
 ### Sessions
 
@@ -80,8 +169,7 @@ One actor is one agent session, one A2A context. The first message records
 its contextId (or the one the SDK generates when it has none) in
 `/home/agent/a2a-context`; any later message with another contextId, or with
 none, is rejected with `InvalidParamsError` (`-32602`): a new conversation
-gets a new actor. A follow-up that names its `taskId` but no contextId
-takes the task's. Messages without a text part are rejected the same way.
+gets a new actor. Messages without a text part are rejected the same way.
 
 The first message that reaches Codex starts a Codex session (`codex exec`);
 the supervisor records its id (`thread_id` of the `thread.started` event) in
@@ -99,37 +187,32 @@ with `UnsupportedOperationError` (`-32004`, naming the running task).
 
 ### Tasks
 
-Each message starts a new task, or continues the task it names (`taskId`)
-while that task waits in `TASK_STATE_AUTH_REQUIRED`. `SendMessage` blocks
-until the task ends unless the request sets
-`configuration.returnImmediately: true`; then it returns the task at once,
-in `TASK_STATE_WORKING`, and the caller polls `GetTask`.
+Each message starts a new task. A message that names a `taskId` is
+rejected: `UnsupportedOperationError` (`-32004`) for an ended task,
+`TaskNotFoundError` for an unknown one. `SendMessage` blocks until the task
+ends unless the request sets `configuration.returnImmediately: true`; then
+it returns the task at once, in `TASK_STATE_WORKING`, and the caller polls
+`GetTask`.
 
 | Outcome | Task state | Content |
 | ------- | ---------- | ------- |
 | Codex answered | `TASK_STATE_COMPLETED` | Artifact `response`: Codex's final message as one text part |
 | Codex exited nonzero | `TASK_STATE_FAILED` | Status message `codex_failed: <why>` (Codex's `turn.failed` message, else the end of its stderr), metadata `{"error": "codex_failed"}` |
 | Killed after `AGENT_TASK_TIMEOUT` seconds (environment, default 3600), with every process it started | `TASK_STATE_FAILED` | `timeout: ...`, metadata `{"error": "timeout"}` |
-| Not logged in to ChatGPT (`codex login status`); Codex did not run | `TASK_STATE_AUTH_REQUIRED` | `Codex is not logged in ...`, metadata `{"error": "needs_login"}`. After the login, send the message again, to the same task or a new one. |
 | `CancelTask` | `TASK_STATE_CANCELED` | Codex and its processes are killed. |
 
 `codex exec` runs with `--dangerously-bypass-approvals-and-sandbox` (no
 approval prompts, no Codex sandbox: the actor's gVisor sandbox is the
 boundary; Codex's own Linux sandbox, bubblewrap in user namespaces, would be
 a second one, untested under gVisor), `--skip-git-repo-check`, `--color
-never`, `--json`, the message's text on stdin, and `--disable
-unbounded_connection_retries`: by default Codex retries an unreachable
-backend until the task is killed; without it a turn fails after Codex's 5
-retries, so a missing egress rule or an outage is a `codex_failed`
-(`Connection failed: ...`) within about half a minute.
+never`, `--json` and the message's text on stdin, with the configuration
+from [model access](#model-access).
 
 ### Example
 
 Through `kubectl ate proxy actor <actor> 8000:8080 -a <atespace>`:
 
 ```sh
-curl -s -X POST localhost:8000/login     # open verification_url, enter user_code
-curl -s localhost:8000/login             # "logged_in": true once done
 curl -s localhost:8000/.well-known/agent-card.json
 
 a2a() {
@@ -205,8 +288,9 @@ skopeo inspect --no-creds docker://ghcr.io/backfabric/agent:<commit>
    ```
 
 3. Set `version` and `hash` in `nix/images/agent.nix`, check `codex exec
-   --help`, `codex exec resume --help`, `codex login --help`, the `--json`
-   events (`thread.started`, `turn.failed`) and the feature
-   `unbounded_connection_retries` of the new version against what the
-   supervisor uses, and open a PR: its CI builds the image, the merge
-   publishes it.
+   --help`, `codex exec resume --help`, the `--json` events
+   (`thread.started`, `turn.failed`), the provider keys of `config.toml`
+   (`env_key`, `wire_api`, `supports_websockets`), the CA variable
+   `CODEX_CA_CERTIFICATE` and the feature `unbounded_connection_retries` of
+   the new version against what the supervisor uses, and open a PR: its CI
+   builds the image, the merge publishes it.
