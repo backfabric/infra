@@ -19,6 +19,9 @@ installer. Why, and the options considered:
 | PostgreSQL 18 (Substrate's bundled StatefulSet, mutual TLS with pod certificates) | `ate-system` | `/var/lib/substrate/postgres` (static local volume `postgres`, 10Gi) |
 | RustFS (S3) and the Job creating the bucket `ate-snapshots` | `ate-system` | `/var/lib/substrate/rustfs` (static local volume `rustfs`, nominally 100Gi) |
 | worker pods of a WorkerPool | a namespace of `backfabric.substrate.workerPoolNamespaces` | `/var/lib/ate` on the host |
+| `substrate-credentials` (oneshot, only with `credentials`) | host | |
+| k8s-credential-provider (only with `credentials`) | `ate-system` | |
+| the Secrets of `credentials` (no pods) | `agent-credentials` | in etcd |
 
 ate-setup applies Substrate's manifests (from the package, with the patches
 listed below); k3s applies the rest from
@@ -166,9 +169,11 @@ node1). Suspended actors resume on the new pool's workers.
 ### Example: agent-0
 
 One actor of this repository's [agent image](agent-image.md) (Codex behind
-an A2A supervisor, port 8080), logged in once with the user's ChatGPT
-subscription and kept across suspends. With `workerPoolNamespaces = [
-"agents" ];` on the host, the private repository applies:
+an A2A server, port 8080), reaching the OpenAI API with a key the egress
+gateway injects ([Egress credentials](#egress-credentials)): the actor holds
+only a placeholder. With `workerPoolNamespaces = [ "agents" ];` and
+`credentials.openai-api-key.atespaces = [ "agents" ];` on the host, the
+private repository applies:
 
 `workerpool.yaml` (kubectl):
 
@@ -199,11 +204,15 @@ spec:
 ```
 
 `actor-template.yaml` (`kubectl ate create actor-template -f`, the
-template's protojson form): the image's entrypoint, the supervisor; its
-home, with Codex's login and session and the work directory, on a
-`durableDir`; memory snapshots. The image is the one published for a commit
-of this repository ([Published images](agent-image.md#published-images)),
-pinned by digest.
+template's protojson form): the image's entrypoint; its home, with Codex's
+sessions and the work directory, on a `durableDir`; memory snapshots. The
+image is the one published for a commit of this repository
+([Published images](agent-image.md#published-images)), pinned by digest.
+`AGENT_OPENAI_API_KEY` is the placeholder Codex sends as `Authorization:
+Bearer injected-by-egress`; `CODEX_CA_CERTIFICATE` points Codex at
+Substrate's trust bundle, the gateway's CA (`egress-mitm.ate.dev`) and
+public roots (`system-roots.ate.dev`), projected by a `systemInfo` volume
+([egress-trust-bundle.md](https://github.com/agent-substrate/substrate/blob/v1.0.0/docs/guides/egress-trust-bundle.md)).
 
 ```yaml
 metadata:
@@ -215,10 +224,14 @@ workerSelector:
 containers:
   - name: agent
     image: ghcr.io/backfabric/agent@sha256:<digest>
+    env:
+      - {name: AGENT_OPENAI_API_KEY, value: injected-by-egress}
+      - {name: CODEX_CA_CERTIFICATE, value: /run/ate/egress-trust-bundle/trust-bundle.pem}
     wakeupProbe:
       httpGet: {path: /healthz, port: 8080}
     volumeMounts:
       - {name: home, mountPath: /home/agent}
+      - {name: egress-trust-bundle, mountPath: /run/ate/egress-trust-bundle}
 resources:
   limits: {cpuMillicores: 2000, memoryBytes: 2147483648}
 snapshotConfig:
@@ -226,31 +239,37 @@ snapshotConfig:
 volumes:
   - name: home
     durableDir: {}
+  - name: egress-trust-bundle
+    systemInfo:
+      dataSources:
+        - trustBundle:
+            names: [egress-mitm.ate.dev, system-roots.ate.dev]
+            path: trust-bundle.pem
 ```
 
 `egress-policy.yaml` (`kubectl ate create egress-policy <actor>`): an egress
 policy belongs to an actor, not to a template (templates only have the
 preview `goldenEgressPolicy`); without one the actor reaches nothing and
-resolves no name. TLS passthrough on 443 to exactly:
+resolves no name. HTTPS to `api.openai.com`, intercepted by the gateway,
+which replaces the placeholder in `Authorization`:
 
 ```yaml
 rules:
-  - tlsPassthrough:
-      hostnames: [auth.openai.com, chatgpt.com]
-      ports:
-        numbers: [443]
+  - https:
+      hostnames: [api.openai.com]
+      effects:
+        replaceHeaders:
+          - header: Authorization
+            prefix: "Bearer "
+            credentialUri: ate-secret://k8s.io/default/agent-credentials/openai-api-key/value
 ```
 
-| Host | Why (codex-rs at `rust-v0.167.2`, the version in the image) |
-| ---- | ---- |
-| `auth.openai.com` | `codex login --device-auth`: `/api/accounts/deviceauth/usercode` and `/api/accounts/deviceauth/token`; token exchange and refresh `/oauth/token` (`login/src/server.rs` `DEFAULT_ISSUER`, `login/src/device_code_auth.rs`, `login/src/auth/manager.rs`) |
-| `chatgpt.com` | the model with a ChatGPT login: `https://chatgpt.com/backend-api/codex` (`model-provider-info` `CHATGPT_CODEX_BASE_URL`), and the account endpoints under `backend-api` |
-
-Passthrough rather than `https`: the gateway does not intercept, so the
-actor needs no MITM CA and WebSockets inside TLS work. Left out on purpose:
-`ab.chatgpt.com` (Codex's Statsig metrics), `github.com`/`api.github.com`
-(the plugin sync), `api.openai.com` (API-key use); Codex carries on without
-them.
+Codex (codex-rs `rust-v0.167.2`, the version in the image) calls the
+Responses API at `https://api.openai.com/v1/responses` over plain HTTPS: the
+image configures a custom model provider without WebSockets, which the
+gateway refuses. Left out on purpose: `ab.chatgpt.com` (Codex's Statsig
+metrics), `github.com`/`api.github.com` (the plugin sync); Codex carries on
+without them.
 
 The image must be public on ghcr.io (atelet pulls without credentials).
 
@@ -266,14 +285,6 @@ kubectl ate create actor agent-0 -a agents --template codex
 kubectl ate create egress-policy agent-0 -a agents -f egress-policy.yaml
 
 kubectl ate proxy actor agent-0 8000:8080 -a agents &
-curl -s -X POST localhost:8000/login     # {"verification_url", "user_code"}
-```
-
-Open `verification_url` in a browser, sign in with the ChatGPT account and
-enter `user_code`. Then:
-
-```sh
-curl -s localhost:8000/login             # "logged_in": true
 curl -s localhost:8000/.well-known/agent-card.json   # JSONRPC, protocolVersion 1.0
 
 a2a() {
@@ -285,7 +296,6 @@ a2a '{"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {
 # .result.task: TASK_STATE_COMPLETED, the answer in artifacts[0].parts[0].text
 
 kubectl ate suspend actor agent-0 -a agents --mode=sync
-curl -s localhost:8000/login             # still logged in, after the resume
 a2a '{"jsonrpc": "2.0", "id": 2, "method": "SendMessage", "params": {
   "message": {"role": "ROLE_USER", "messageId": "m2", "contextId": "c1",
     "parts": [{"text": "What did I ask you before?"}]},
@@ -295,11 +305,11 @@ a2a '{"jsonrpc": "2.0", "id": 3, "method": "GetTask", "params": {"id": "<task id
 ```
 
 The gateway caches a missing policy as deny for 10 seconds, so wait that
-long if the login was tried before the policy existed. Gateway decisions:
+long if a task was sent before the policy existed. Gateway decisions,
+including why an injection was denied:
 `kubectl -n ate-system logs deploy/atenet-egress -c ext-proc | grep agent-0`.
 
-The snapshots in RustFS hold the agent's Codex login: whoever can read
-`/var/lib/substrate/rustfs` can use the subscription. Remove agent-0:
+Remove agent-0:
 
 ```sh
 kill %1
@@ -307,6 +317,94 @@ kubectl ate delete actor agent-0 -a agents
 kubectl ate delete actor-template codex -a agents
 kubectl ate delete atespace agents
 kubectl delete -f workerpool.yaml
+```
+
+## Egress credentials
+
+Substrate's egress gateway can put a credential into an actor's HTTPS
+requests, so that the actor never holds it
+([ADR 0030](adr/0030-egress-injected-model-keys.md), upstream's
+[egress-credential-injection.md](https://github.com/agent-substrate/substrate/blob/v1.0.0/docs/guides/egress-credential-injection.md)).
+It is off until the host declares a credential:
+
+```nix
+backfabric.substrate.credentials.openai-api-key = {
+  # The sops secret with the value (`sops.secrets.<name>`, from
+  # sops.defaultSopsFile unless its sopsFile says otherwise); the default
+  # is the credential's name.
+  sopsSecret = "openai-api-key";
+  # The atespaces whose actors may use it.
+  atespaces = [ "agents" ];
+};
+```
+
+Add the value to the host's sops file in the private repository (needs an
+admin key; the value goes to sops through a pipe, never into an argument
+or an unencrypted file), commit, and deploy:
+
+```sh
+read -rsp 'OpenAI API key: ' key && printf '%s' "$key" | jq -Rs . |
+  sops set --value-stdin secrets/node1.yaml '["openai-api-key"]'; unset key
+git add secrets && git commit -m "chore: add the OpenAI API key for agents"
+backfabric deploy node1
+```
+
+With one credential or more:
+
+- the SubstrateInstall document selects the bundled Kubernetes Secrets
+  provider (`atenet.egress.credentialProvider = {"name":"k8s.io"}`), so
+  `substrate-install` runs again: ate-setup deploys
+  `ate-system/k8s-credential-provider` (image `kubernetes-secrets`, pinned
+  and allowed in `ate-system`) and restarts `atenet-egress` with it. The
+  package removes the provider's upstream ClusterRole and
+  ClusterRoleBinding, which read Secrets in every namespace;
+- `substrate-credentials` (oneshot, after `substrate-install`) applies the
+  namespace `agent-credentials`: a ResourceQuota of 0 pods, a NetworkPolicy
+  that denies all ingress and egress, and a Role and RoleBinding that let
+  the provider's service account `get` exactly the declared Secrets. It
+  writes each credential into the Secret `agent-credentials/<name>` (key
+  `value`, label `backfabric.dev/credential=<name>`), reading the sops
+  secret's file with jq, so that the value is never in an argument, a file
+  of its own or the journal; deletes the labelled Secrets no longer
+  declared; applies the provider's policy
+  `ate-system/k8s-credential-provider-namespace-policy`, one grant per
+  credential and atespace narrowed to that Secret's label; and, because the
+  provider reads its policy only at startup, sets the policy's hash on the
+  provider's pod template, which restarts it only when the policy changed.
+
+`substrate-credentials` runs at every deployment, at boot, after every run
+of `substrate-install`, and when a credential's sops secret changes
+(sops-nix restarts it). Rotating a key: replace the value in sops, commit,
+deploy; the next request uses the new key.
+
+An actor uses a credential with an `https` rule whose `replaceHeaders`
+names it as `ate-secret://k8s.io/default/agent-credentials/<name>/value`
+(agent-0 above), and must trust the gateway's CA through the projected
+trust bundle. A request without the header is forwarded without injection;
+one that carries it is denied when the credential cannot be produced: 403
+when the atespace is not granted or the Secret is missing, 503 when the
+provider does not answer.
+
+Checks, as root on the host:
+
+```sh
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+systemctl status substrate-credentials   # inactive (dead), status=0/SUCCESS
+kubectl -n agent-credentials get secrets -L backfabric.dev/credential   # openai-api-key
+kubectl -n ate-system get configmap k8s-credential-provider-namespace-policy \
+  -o jsonpath='{.data.namespace-policy\.yaml}' | jq   # agents → agent-credentials, label openai-api-key
+kubectl -n ate-system rollout status deployment/k8s-credential-provider
+kubectl -n ate-system get deployment atenet-egress -o yaml | grep credential-provider   # the k8s.io provider flags
+kubectl -n ate-system logs deployment/atenet-egress -c ext-proc | grep 'egress denied'   # why a request was denied
+```
+
+Removing a credential deletes its Secret at the next deployment. Removing
+the last one turns injection off (ate-setup removes the provider) and stops
+`substrate-credentials`; the namespace and its Secrets stay. Delete them:
+
+```sh
+kubectl delete namespace agent-credentials
+kubectl -n ate-system delete configmap k8s-credential-provider-namespace-policy
 ```
 
 ## Image allowlist of the exempt namespaces
@@ -325,13 +423,15 @@ pods.
   `atelet`, `atenet`, `objectstore-plugin` and `envoy-dataplane` as
   `ghcr.io/agent-substrate/substrate/<name>:v1.0.0@<digest>` (the form
   ate-setup writes after resolving the tag), upstream's
-  `postgres:18-alpine@sha256:…`, RustFS and aws-cli.
+  `postgres:18-alpine@sha256:…`, RustFS and aws-cli; with `credentials`
+  also the credential provider's `kubernetes-secrets`.
 - each WorkerPool namespace (`agents`, `substrate-smoke`): the
   `ateworker-gvisor` image.
 
 The digests are pinned in `nix/packages/substrate.nix`. Building the package
 checks that the `ate-system` list is exactly the set of images the patched
-manifests produce, so a new release cannot add one unnoticed.
+manifests produce (the credential provider's on its own), so a new release
+cannot add one unnoticed.
 
 The binding rejects (`validationActions: [Deny, Audit]`): a pod with an
 unlisted image is not created, the client (ate-setup, a controller,
@@ -387,9 +487,11 @@ when no other subsystem exempts a namespace (ADR 0024). **What stays:**
   (`*.podcert.ate.dev/identity`) and any PodCertificateRequests, in etcd
   but no longer served once the feature gates and runtime-config are gone,
   so they cannot be listed or deleted afterwards;
-- `/var/lib/substrate` (PostgreSQL and the snapshots, including agents'
-  logins), `/var/lib/ate` (atelet's image cache and actor state) and
-  `/var/lib/substrate-install` on the host.
+- `/var/lib/substrate` (PostgreSQL and the snapshots), `/var/lib/ate`
+  (atelet's image cache and actor state) and `/var/lib/substrate-install`
+  on the host;
+- with credentials, the namespace `agent-credentials` and its Secrets
+  (delete it: `kubectl delete namespace agent-credentials`).
 
 On a host that never had Substrate the same three `--disable` entries are
 there from the start; they remove nothing, but adding them restarts k3s
@@ -441,8 +543,8 @@ Remove everything, in this order, as root on the host:
    kubectl delete clusterrole ate-api-server ate-controller atelet podcert-ate-dev-signer --ignore-not-found
    ```
 
-4. Delete the data on the host (irreversible; the snapshots hold agents'
-   logins): `rm -rf /var/lib/substrate /var/lib/ate /var/lib/substrate-install`.
+4. Delete the data on the host (irreversible; the snapshots hold the agents'
+   memory and files): `rm -rf /var/lib/substrate /var/lib/ate /var/lib/substrate-install`.
    Then check that nothing of Substrate is left:
 
    ```sh
@@ -462,7 +564,7 @@ script) sets:
 | `kubeconfig`, `context` | `/etc/rancher/k3s/k3s.yaml`, `default` | k3s's; with no context and `gcp.projectID` set, ate-setup would run `gcloud container clusters get-credentials` |
 | `images.repo`, `images.tag` | `ghcr.io/agent-substrate/substrate`, `v1.0.0` | the release's public images instead of building with ko |
 | `sandboxClasses` | `gvisor` | no microVM: no `/dev/kvm`, no asset staging (default `gvisor,microvm`) |
-| `atenet.egress.credentialProvider` | `{"enabled":false}` | no egress credential injection |
+| `atenet.egress.credentialProvider` | `{"name":"k8s.io"}` with `credentials`, otherwise `{"enabled":false}` | egress credential injection with the bundled Kubernetes Secrets provider only while a credential is declared ([Egress credentials](#egress-credentials)) |
 | `ingressAllowedSPIFFEIDs` | `spiffe://cluster.local/ns/ate-system/sa/atenet-client` | only `kubectl ate proxy` may reach actors (no default: unset, nothing can) |
 | `ateapi.authz.bootstrapOwners` | `system:serviceaccount:ate-system:ate-client` | the default, pinned |
 | `ateapi.postgres.storageClass` | `backfabric-local` | the bundled PostgreSQL's claim binds to the static volume |
@@ -499,6 +601,11 @@ patches the paths it reads:
 - `pod-certificate-controller.yaml`: pod seccomp profile `RuntimeDefault`,
   the only thing its pod lacked for Pod Security `restricted`, so its
   namespace is not exempt.
+- `egress-credential-injection/k8s-credential-provider.yaml` (applied only
+  with `credentials`): without the ClusterRole and ClusterRoleBinding
+  `k8s-credential-provider-secret-reader`, which let the provider read
+  Secrets in every namespace; `substrate-credentials` grants it `get` on
+  the declared Secrets in `agent-credentials` instead.
 
 Each patch checks what it replaces, so a new release that changes it fails
 the build instead of being patched silently.
