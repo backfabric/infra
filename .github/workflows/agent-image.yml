@@ -51,7 +51,11 @@ jobs:
           # Without a key the supervisor does not start.
           if timeout 60 docker run --rm --network none "$image" >no-key.log; then exit 1; fi
           jq --exit-status 'select(.error == "no_api_key")' no-key.log
+          # api.openai.com resolves to the container itself, so a connection
+          # is refused at once; without any DNS answer the static Codex waits
+          # out its resolver's timeouts on every retry (about 3 minutes).
           docker run --detach --name agent --network none \
+            --add-host api.openai.com:127.0.0.1 \
             --env AGENT_OPENAI_API_KEY=injected-by-egress "$image"
           trap 'docker logs agent' EXIT
           # HTTP from inside the container, the network being closed:
