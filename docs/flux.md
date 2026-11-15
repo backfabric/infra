@@ -18,7 +18,7 @@ backfabric.flux = {
     branch = "main";                # the default
     tokenSecret = "flux-git-token"; # the default, in secrets/common.yaml
   };
-  namespace = "agents";             # the default
+  # The namespace is always `agents`, created by the module.
   # The default; the kagent PR adds its kinds.
   allowedResources = [ { apiGroup = ""; resources = [ "configmaps" ]; } ];
 };
@@ -29,7 +29,7 @@ backfabric.flux = {
 | Flux Operator | Helm release `flux-operator` in `flux-system`, from the upstream chart `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` 0.62.1 (k3s HelmChart `kube-system/flux-operator`, manifest `flux-operator`) |
 | Flux | FluxInstance `flux-system/flux` (manifest `flux-instance`): Flux 2.10.0, source-, kustomize-, helm- and notification-controller, images by digest, multi-tenancy lockdown |
 | Agents' namespace and identity | Namespace `agents`; ServiceAccount `flux-system/flux-agents`; Role and RoleBinding `agents/flux-agents` with `allowedResources` (manifest `flux-agents`) |
-| Sync | GitRepository and Kustomization `flux-system/agents` (manifest `flux-agents-sync`): `ref.branch`, fetched every 1m; the Kustomization applies `path` as `flux-agents`, with prune, every 10m and on every new revision |
+| Sync | GitRepository and Kustomization `flux-system/agents` (manifest `flux-agents-sync`): `ref.branch`, fetched every 1m, sparse checkout of `path` only; the Kustomization applies `path` as `flux-agents`, with prune, every 10m and on every new revision |
 | Git credential | Secret `flux-system/flux-git-credentials` (`username: git`, `password`: the token), rendered by sops-nix into `/run/secrets/rendered/flux-git-credentials.yaml` (root, 0400), deployed by k3s (manifest `flux-git-credentials`) |
 
 ## What the agents directory may do
@@ -37,17 +37,39 @@ backfabric.flux = {
 The directory is untrusted: a commit there must not reach beyond the
 agents. Flux applies it impersonating
 `system:serviceaccount:flux-system:flux-agents`, whose only rights are the
-Role in `agents`: get, list, watch, create, patch, delete on
-`allowedResources` (server-side apply is a PATCH that may create; diff
-GETs; prune DELETEs). The API server refuses everything else:
+Role in `agents`: get, create, patch, delete on `allowedResources`. That
+is what kustomize-controller does as this account without `wait` or
+health checks (fluxcd/pkg/ssa v0.83.0): GET (`manager_apply.go`,
+`manager_diff.go`), server-side apply PATCH (`create` too when the object
+is new), GET and DELETE to prune or recreate (`manager_delete.go`); it
+never lists or watches. The API server refuses everything else:
 
 - objects in any other namespace, and cluster-scoped kinds (Namespaces,
-  ClusterRoles, CRDs, webhooks);
-- RBAC, Secrets, ServiceAccounts, and Flux's own kinds (a Kustomization
-  with another `serviceAccountName`, another source): these may not be
-  listed in `allowedResources` at all, evaluation fails;
+  ClusterRoles, CRDs, webhooks), including the Namespace `agents` itself
+  (its Pod Security labels);
+- RBAC, Namespaces, Secrets, ServiceAccounts, and Flux's own kinds
+  (sources, Kustomizations and HelmReleases with another
+  `serviceAccountName`, image automation, `source.extensions.fluxcd.io`):
+  these may not be listed in `allowedResources` at all, evaluation fails;
 - pods that break Pod Security `restricted` (the cluster's default, also
   in `agents`).
+
+The GitRepository fetches only `path` (`spec.sparseCheckout`,
+source-controller v1.10.1): the kustomize build cannot read other files
+of the private repository (`hosts/`, `secrets/`), even through a relative
+path. `path` must exist in the branch, or the GitRepository is not Ready.
+
+What remains possible inside the rights: server-side apply forces
+ownership, so the directory can take over, change and then prune any
+object of an allowed kind in `agents` that it did not create, e.g. the
+ConfigMap `kube-root-ca.crt` Kubernetes puts in every namespace (it puts
+it back).
+
+The split by directory holds only as far as the repository's own
+controls: write access to the private repository also covers `hosts/`
+and `flake.nix`, which become root on the hosts (and cluster-admin) at
+the next deployment. Protect the branch (review or CODEOWNERS for
+everything outside `agents/`) and review what a deployment pins.
 
 A refused object fails the whole revision: the Kustomization turns not
 Ready with the API server's message, and the previous revision stays

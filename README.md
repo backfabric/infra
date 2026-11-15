@@ -208,8 +208,8 @@ nix flake init -t github:backfabric/infra
   upstream's NetworkPolicies, and Flux's multi-tenancy lockdown. Flux
   applies `repository.path` of `repository.url` (branch
   `repository.branch`, prune) as a service account whose only rights are
-  `allowedResources` (default: ConfigMaps) in `namespace` (default
-  `agents`, created by the module); anything else a commit asks for is
+  `allowedResources` (default: ConfigMaps) in the namespace `agents`
+  (created by the module); anything else a commit asks for is
   refused. The repository is fetched over HTTPS with a read-only GitHub
   token, `flux-git-token` in `backfabric.secrets.commonFile`, rendered into
   a Secret in `flux-system` without entering the Nix store. See

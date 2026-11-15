@@ -17,16 +17,16 @@
 #     identity for a Flux object, refuse cross-namespace references and
 #     remote kustomize bases. No `sync`: the operator's sync Kustomization
 #     would run as kustomize-controller (cluster-admin);
-#   - the agents: the namespace `namespace` (created here, Pod Security
+#   - the agents: the namespace `agents` (created here, Pod Security
 #     `restricted` as every namespace) and, in `flux-system`, a
-#     GitRepository and a Kustomization that apply `repository.path` of
-#     `repository.url` (prune) as the service account
-#     `flux-system/flux-agents`, whose only rights are a Role in
-#     `namespace` with `allowedResources`. Everything else a commit asks
-#     for (another namespace, cluster-scoped kinds, RBAC, Secrets, Flux's
-#     own kinds) is refused by the API server. The source, the credential
-#     and the service account stay in `flux-system`, out of reach of what
-#     runs in `namespace`;
+#     GitRepository (sparse checkout of `repository.path` only) and a
+#     Kustomization that apply `repository.path` of `repository.url`
+#     (prune) as the service account `flux-system/flux-agents`, whose only
+#     rights are a Role in `agents` with `allowedResources`. Everything
+#     else a commit asks for (another namespace, cluster-scoped kinds, the
+#     namespace itself, RBAC, Secrets, Flux's own kinds) is refused by the
+#     API server. The source, the credential and the service account stay
+#     in `flux-system`, out of reach of what runs in `agents`;
 #   - the Git credential: a GitHub token from sops (`repository.tokenSecret`
 #     in the cluster-wide sops file), rendered by sops-nix into a Secret in
 #     /run/secrets/rendered and deployed by k3s from there, never in the Nix
@@ -43,7 +43,10 @@ let
   cfg = config.backfabric.flux;
 
   fluxNamespace = "flux-system";
-  inherit (cfg) namespace;
+  # Fixed, not an option: the module creates it and deletes it with
+  # everything in it when turned off, so it must never be a namespace
+  # anything else owns.
+  namespace = "agents";
 
   # The operator's chart and image: a chart release and its appVersion.
   # Bumping the version changes the image in the values, so k3s's Helm
@@ -67,20 +70,24 @@ let
   sync = "agents";
 
   # Kinds the private repository must never manage, whatever
-  # `allowedResources` says: rights (RBAC, service account tokens),
-  # credentials, Flux's own kinds (another source or another identity), and
-  # wildcards.
+  # `allowedResources` says: rights (RBAC, service account tokens), the
+  # namespace object itself (its Pod Security labels), credentials, Flux's
+  # own kinds (another source, image automation writing to Git, or another
+  # identity), and wildcards.
   deniedGroups = [
     "*"
     "rbac.authorization.k8s.io"
     "source.toolkit.fluxcd.io"
+    "source.extensions.fluxcd.io"
     "kustomize.toolkit.fluxcd.io"
     "helm.toolkit.fluxcd.io"
     "notification.toolkit.fluxcd.io"
+    "image.toolkit.fluxcd.io"
     "fluxcd.controlplane.io"
   ];
   deniedResources = [
     "*"
+    "namespaces"
     "secrets"
     "serviceaccounts"
     "serviceaccounts/token"
@@ -88,6 +95,13 @@ let
   deniedRules = lib.filter (
     r: lib.elem r.apiGroup deniedGroups || lib.intersectLists r.resources deniedResources != [ ]
   ) cfg.allowedResources;
+
+  # The directory as source-controller's sparse checkout expects it: without
+  # `./`, with a trailing `/`. go-git keeps the index entries whose path
+  # starts with it (plumbing/format/index/index.go, SkipUnless, a plain
+  # prefix match), so the slash keeps out `agents/node10/` and files next
+  # to the directory.
+  sparseDir = lib.removeSuffix "/" (lib.removePrefix "./" cfg.repository.path);
 
   # The k3s manifests this module deploys, by name: deployed while it is
   # enabled, and removed (backfabric.k3s.removedManifests) while it is not.
@@ -135,15 +149,16 @@ let
           name = serviceAccount;
           inherit namespace;
         };
-        # Server-side apply is a PATCH (that may create), diff and dry-run
-        # GET, prune DELETE; no UPDATE.
+        # What kustomize-controller does as this account without `wait` or
+        # health checks (fluxcd/pkg/ssa v0.83.0): GET the object
+        # (manager_apply.go, manager_diff.go), server-side apply PATCH, which
+        # needs `create` when the object is new, and GET plus DELETE to prune
+        # or recreate (manager_delete.go). Nothing lists or watches.
         rules = map (r: {
           apiGroups = [ r.apiGroup ];
           inherit (r) resources;
           verbs = [
             "get"
-            "list"
-            "watch"
             "create"
             "patch"
             "delete"
@@ -185,6 +200,11 @@ let
           ref.branch = cfg.repository.branch;
           interval = "1m";
           secretRef.name = credentialsSecret;
+          # Only the agents' directory is fetched: the kustomize build, rooted
+          # at the artifact, cannot read the rest of the private repository
+          # (source-controller v1.10.1, api/v1/gitrepository_types.go,
+          # `SparseCheckout`).
+          sparseCheckout = [ "${sparseDir}/" ];
         };
       }
       {
@@ -215,16 +235,6 @@ in
   options.backfabric.flux = {
     enable = lib.mkEnableOption "Flux applying the agents from the private repository (docs/flux.md)";
 
-    namespace = lib.mkOption {
-      type = lib.types.strMatching "[a-z0-9]([-a-z0-9]*[a-z0-9])?";
-      default = "agents";
-      description = ''
-        The namespace the private repository's agents live in, created by
-        this module. Flux applies `repository.path` only into it, with the
-        rights of `allowedResources`.
-      '';
-    };
-
     allowedResources = lib.mkOption {
       type = lib.types.listOf (
         lib.types.submodule {
@@ -249,10 +259,10 @@ in
         }
       ];
       description = ''
-        What the private repository may manage in `namespace`: the only
-        rules of the Role Flux applies `repository.path` with. RBAC, Secrets,
-        ServiceAccounts, Flux's own kinds and wildcards are refused at
-        evaluation.
+        What the private repository may manage in the namespace `agents`:
+        the only rules of the Role Flux applies `repository.path` with.
+        RBAC, Namespaces, Secrets, ServiceAccounts, Flux's own kinds and
+        wildcards are refused at evaluation.
       '';
     };
 
@@ -275,7 +285,8 @@ in
         type = lib.types.str;
         example = "./agents/node1";
         description = ''
-          The directory of the repository Flux applies into `namespace`: a
+          The directory of the repository Flux applies into the namespace
+          `agents`, and the only one it fetches: a
           kustomization or plain manifests. Everything Flux applied from it
           and that is removed from it is deleted (prune).
         '';
@@ -304,18 +315,15 @@ in
       assertions = [
         {
           assertion = deniedRules == [ ];
-          message = "backfabric.flux.allowedResources must not contain RBAC, Secrets, ServiceAccounts, Flux's kinds or wildcards: ${builtins.toJSON deniedRules}";
+          message = "backfabric.flux.allowedResources must not contain RBAC, Namespaces, Secrets, ServiceAccounts, Flux's kinds or wildcards: ${builtins.toJSON deniedRules}";
         }
         {
           assertion =
-            !lib.elem namespace [
-              "default"
-              "kube-system"
-              "kube-public"
-              "kube-node-lease"
-              fluxNamespace
-            ];
-          message = "backfabric.flux.namespace must be a namespace of its own, not ${namespace}";
+            sparseDir != ""
+            && sparseDir != "."
+            && !lib.elem ".." (lib.splitString "/" sparseDir)
+            && !lib.hasPrefix "/" sparseDir;
+          message = "backfabric.flux.repository.path must be a subdirectory of the repository, e.g. ./agents/node1, not ${cfg.repository.path}";
         }
       ];
 
