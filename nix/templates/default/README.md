@@ -325,10 +325,41 @@ Sending, reading the archive, and renewing the certificate:
 
 ## Agents
 
-This flake installs no agent runtime for now: agents are to run on kagent
-behind agentgateway, deployed by Nix as upstream charts
-([ADR 0029](https://github.com/backfabric/infra/blob/main/docs/adr/0029-kagent-agent-platform.md)).
-A host that ran the earlier runtime keeps its leftovers; the ADR's
+Agents run on [kagent](https://github.com/backfabric/infra/blob/main/docs/kagent.md)
+([ADR 0029](https://github.com/backfabric/infra/blob/main/docs/adr/0029-kagent-agent-platform.md)),
+installed by kagent's own installer, run by Nix, off by default. It needs
+k3s 1.37 or later from this repository's nixpkgs, and an OpenAI API key.
+
+1. Add the key to `secrets/common.yaml`, without echo or an argument:
+
+   ```sh
+   read -rs KEY && printf '"%s"' "$KEY" |
+     sops set --value-stdin secrets/common.yaml '["kagent-openai-api-key"]'; unset KEY
+   ```
+
+2. In `hosts/node1/default.nix` (every server of the cluster sets the
+   same values):
+
+   ```nix
+   backfabric.k3s.package = pkgs.k3s_1_37;
+   backfabric.kagent = {
+     enable = true;
+     model = "gpt-5-mini";   # the default
+     # Required, the same on every server: the node that holds kagent's
+     # PostgreSQL and RustFS volumes.
+     dataNode = "node1";
+   };
+   ```
+
+3. Commit and deploy: `backfabric deploy node1`. The first install takes
+   10 to 20 minutes.
+4. Check on the host: `systemctl status kagent-install` succeeded, and
+   `kubectl get pods -n kagent` shows `kagent-controller`, `kagent-ui` and
+   `kagent-postgresql` Running. kagent is reachable only by port-forward
+   until agentgateway fronts it; the runbook shows the UI, an agent over
+   A2A, and turning it off.
+
+A host that ran the earlier runtime keeps its leftovers; ADR 0029's
 consequences say what they are and how to delete them.
 
 ## Platform PostgreSQL
