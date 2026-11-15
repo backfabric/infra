@@ -81,6 +81,17 @@
     ];
   };
 
+  # Flux applies `agents/example` of the private repository into the
+  # namespace `agents` (ConfigMaps only, the default), with the token
+  # `flux-git-token` from `secrets/common.yaml`.
+  backfabric.flux = {
+    enable = true;
+    repository = {
+      url = "https://github.com/example/fleet";
+      path = "./agents/example";
+    };
+  };
+
   # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,
   # with the report that `backfabric probe` generates with nixos-facter. This
   # excerpt has the shape of a real report of a Hetzner server (fields the

@@ -354,6 +354,50 @@ backfabric.postgres = {
 There are no backups yet. Status, connecting, and turning it off:
 [platform PostgreSQL](https://github.com/backfabric/infra/blob/main/docs/postgres.md).
 
+## Flux
+
+The agents come from this repository through
+[Flux](https://github.com/backfabric/infra/blob/main/docs/flux.md): Flux
+applies `agents/<host>/` into the namespace `agents` and keeps it equal to
+it (an object removed from the directory is deleted). The template has
+`agents/node1/kustomization.yaml`, empty; rename the directory after your
+host. Flux may only manage the kinds of `backfabric.flux.allowedResources`
+(ConfigMaps until kagent's kinds are added) in `agents`; every object
+names `namespace: agents`, and anything else is refused. The platform
+itself is configured in Nix, not here; application secrets stay in
+OpenBao, never in Git.
+
+1. Push this repository to GitHub (private), if it is not there yet: Flux
+   fetches from GitHub, so every change must be pushed.
+2. Create a fine-grained personal access token: GitHub, Settings,
+   Developer settings, Personal access tokens, Fine-grained tokens; only
+   this repository; Repository permissions: Contents: Read-only, nothing
+   else. Note its expiry.
+3. `sops secrets/common.yaml`, add `flux-git-token: github_pat_...`, save.
+4. In `hosts/node1/default.nix`:
+
+   ```nix
+   backfabric.flux = {
+     enable = true;
+     repository = {
+       url = "https://github.com/<owner>/<repository>";
+       path = "./agents/node1";
+     };
+   };
+   ```
+
+5. Commit, push, deploy:
+
+   ```sh
+   git add -A && git commit -m "feat: deliver the agents with Flux" && git push
+   backfabric deploy node1
+   ```
+
+6. Check on the host: `kubectl -n flux-system get fluxinstance,gitrepository,kustomization`
+   shows all three Ready, the GitRepository `agents` at your latest
+   commit. From now on a push to `agents/node1/` reaches the cluster
+   within about a minute, without a deployment.
+
 ## Unlock after a reboot
 
 After every reboot the host waits for the LUKS passphrase in the initrd.

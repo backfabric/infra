@@ -60,7 +60,8 @@ requires them there for the flake to be `github:backfabric/infra`.
   [the audit telemetry collector](docs/otel.md),
   [the platform PostgreSQL](docs/postgres.md),
   [the agent image](docs/agent-image.md),
-  [Agent Substrate](docs/substrate.md);
+  [Agent Substrate](docs/substrate.md),
+  [Flux](docs/flux.md);
   architectural decisions in [docs/adr/](docs/adr/).
 
 ## Private repository
@@ -197,6 +198,22 @@ nix flake init -t github:backfabric/infra
   the namespace of the service that uses it: only those namespaces may
   connect, and each gets a Secret with the connection details and a
   generated password. See [docs/postgres.md](docs/postgres.md).
+- `flux` (off unless `backfabric.flux.enable`): [Flux](https://fluxcd.io/)
+  delivers the agents, and only them, from a directory of the private
+  repository; the platform is delivered by Nix
+  ([ADR 0027](docs/adr/0027-flux-for-agents.md)). The
+  [Flux Operator](https://fluxoperator.dev/) from its upstream Helm chart
+  (pinned by hash, image by digest, web UI off), installed by k3s, and one
+  FluxInstance with an exact Flux version (controller images by digest),
+  upstream's NetworkPolicies, and Flux's multi-tenancy lockdown. Flux
+  applies `repository.path` of `repository.url` (branch
+  `repository.branch`, prune) as a service account whose only rights are
+  `allowedResources` (default: ConfigMaps) in `namespace` (default
+  `agents`, created by the module); anything else a commit asks for is
+  refused. The repository is fetched over HTTPS with a read-only GitHub
+  token, `flux-git-token` in `backfabric.secrets.commonFile`, rendered into
+  a Secret in `flux-system` without entering the Nix store. See
+  [docs/flux.md](docs/flux.md).
 
 ## Checks
 

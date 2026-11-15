@@ -1,0 +1,8 @@
+# The agents Flux applies to node1's cluster (backfabric.flux.repository.path
+# = "./agents/node1"); rename the directory after the host. List the files
+# of this directory. Every object needs `namespace: agents` (the
+# backfabric.flux.namespace) and a kind in backfabric.flux.allowedResources;
+# anything else is refused. An object removed from here is deleted.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
