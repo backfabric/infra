@@ -10,7 +10,7 @@ kagent and the Substrate fork it brings are installed in production by kagent's 
 - The unit runs at every boot and deployment on every server. What was installed is recorded in the cluster: a ConfigMap with a stamp, a SHA-256 over the CLI version, the install arguments, the model and the key. When it matches and kagent's release is deployed, the unit does nothing. Otherwise it takes a Kubernetes Lease (`coordination.k8s.io`), so that two servers never install at once, runs the installer, and writes the stamp only on success. A changed version, model or key runs the installer again: Helm upgrades, and the installer keeps the CAs and Secrets that exist. Because the marker is in the cluster, a reinstalled server does not install again.
 - Turning the subsystem off uninstalls nothing; the teardown is ordered and manual: kagent's own `kagent uninstall`, then the namespaces through `backfabric.k3s.removedManifests`.
 
-Our own code is the package (about 50 lines of Nix), the module's manifest, options and unit (about 160 lines of Nix), and the unit's script (about 100 lines of bash, shellchecked at build time).
+Our own code is the CLI package (`nix/packages/kagent.nix`, 51 lines) and the module (`nix/modules/kagent.nix`, 404 lines with comments and option descriptions, 293 without): the namespaces and volumes manifest, the options, the unit, and the unit's script (98 lines of bash, 70 without comments and blank lines, shellchecked at build time). Everything the installer does is upstream and unchanged.
 
 ## Considered Options
 

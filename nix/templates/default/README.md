@@ -345,6 +345,9 @@ k3s 1.37 or later from this repository's nixpkgs, and an OpenAI API key.
    backfabric.kagent = {
      enable = true;
      model = "gpt-5-mini";   # the default
+     # Required, the same on every server: the node that holds kagent's
+     # PostgreSQL and RustFS volumes.
+     dataNode = "node1";
    };
    ```
 

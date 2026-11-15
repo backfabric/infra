@@ -25,7 +25,10 @@
 #     it at once. A different stamp runs it again: every chart step is a
 #     `helm upgrade --install`, and the installer creates its CAs and
 #     Secrets only if they are missing. A failed install writes no stamp
-#     and fails the unit; the next start runs it again;
+#     and fails the unit; the next start runs it again. A Helm release
+#     left pending by an install that was killed would block it: the unit
+#     then fails naming the release, and the operator recovers it
+#     (docs/kagent.md, "A release stuck in pending");
 #   - the OpenAI API key from sops (`apiKeySecret` in the cluster-wide sops
 #     file). The CLI reads it only from its environment (OPENAI_API_KEY),
 #     so it is set for that process alone, never in an argument, the unit's
@@ -53,31 +56,59 @@ let
   # Longer than an install can take: six Helm steps, the PostgreSQL and
   # atelet rollouts, at most 5 min each.
   leaseSeconds = 3600;
+  # The installer's Helm releases, as a jq stream of [namespace, name].
+  releases = lib.concatMapStringsSep ", " builtins.toJSON [
+    [
+      namespace
+      "kagent-crds"
+    ]
+    [
+      namespace
+      "kagent"
+    ]
+    [
+      "ate-system"
+      "substrate-crds"
+    ]
+    [
+      "ate-system"
+      "substrate-atelet"
+    ]
+    [
+      "ate-system"
+      "substrate"
+    ]
+    [
+      "podcertificate-controller-system"
+      "substrate-podcert"
+    ]
+  ];
 
   # The model, through the CLI config's values files for the kagent chart
   # (applied after the CLI's own values, before the API key).
-  values = pkgs.writeText "kagent-values.json" (
-    builtins.toJSON { providers.openAI.model = cfg.model; }
+  valuesContent = builtins.toJSON { providers.openAI.model = cfg.model; };
+  # builtins.toFile: store paths that depend on the content alone, not on
+  # nixpkgs.
+  values = builtins.toFile "kagent-values.json" valuesContent;
+  cliConfig = builtins.toFile "kagent-config.json" (
+    builtins.toJSON { install.kagent.valuesFiles = [ values ]; }
   );
-  cliConfig = pkgs.writeText "kagent-config.json" (
-    builtins.toJSON { install.kagent.valuesFiles = [ "${values}" ]; }
-  );
+  # After `--config <cliConfig>`.
   installArgs = [
-    "--config"
-    "${cliConfig}"
     "install"
     "--namespace"
     namespace
     "--provider"
     "OpenAI"
   ];
-  # What an install depends on besides the key; the stamp hashes it with
+  # What an install depends on besides the key, by content (no store
+  # path, so a nixpkgs update changes nothing); the stamp hashes it with
   # the key.
   inputs = builtins.hashString "sha256" (
     builtins.toJSON {
       inherit (kagent) version;
       args = installArgs;
-      inherit (cfg) model;
+      values = valuesContent;
     }
   );
 
@@ -235,13 +266,19 @@ let
         # over at once, one gets a conflict.
         lease "$(jq -r .metadata.resourceVersion <<<"$current")" | kubectl replace -f - >/dev/null 2>&1
       }
+      # Delete the Lease while this host holds it, with the read uid and
+      # resourceVersion as preconditions: never one another server took.
       release() {
-        [[ $(kubectl -n ${namespace} get lease ${marker} -o jsonpath='{.spec.holderIdentity}' 2>/dev/null) == "$host" ]] &&
-          kubectl -n ${namespace} delete lease ${marker} >/dev/null
-        return 0
+        local current
+        current=$(kubectl -n ${namespace} get lease ${marker} -o json 2>/dev/null) || return 0
+        [[ $(jq -r .spec.holderIdentity <<<"$current") == "$host" ]] || return 0
+        jq '{apiVersion: "v1", kind: "DeleteOptions",
+          preconditions: {uid: .metadata.uid, resourceVersion: .metadata.resourceVersion}}' <<<"$current" |
+          kubectl delete --raw /apis/coordination.k8s.io/v1/namespaces/${namespace}/leases/${marker} -f - >/dev/null
       }
       wait_until ${toString leaseSeconds} "the Lease ${namespace}/${marker}, held by another server; kubectl -n ${namespace} get lease ${marker} -o yaml" acquire
-      trap release EXIT
+      # Never changes the unit's result: a Lease left behind expires.
+      trap 'release || echo "Could not release the Lease ${namespace}/${marker}; it expires after ${toString leaseSeconds} s." >&2' EXIT
 
       # Another server may have installed it meanwhile.
       if up_to_date; then
@@ -249,10 +286,21 @@ let
         exit 0
       fi
 
+      # A Helm release left pending by an install that was killed blocks
+      # every later `helm upgrade` ("another operation is in progress").
+      # No install runs now (this host holds the Lease); recovering is the
+      # operator's (docs/kagent.md, "A release stuck in pending").
+      pending=$(helm list --all-namespaces --pending -o json |
+        jq -r '.[] | select([.namespace, .name] | IN(${releases})) | "\(.namespace)/\(.name) (\(.status))"')
+      if [[ -n $pending ]]; then
+        echo "Helm releases left pending by an interrupted install: $pending. See docs/kagent.md, \"A release stuck in pending\"." >&2
+        exit 1
+      fi
+
       echo "Running kagent install (kagent ${kagent.version}, stamp ''${stamp:0:12})."
       # The key only in the environment of `kagent install` (and the helm
       # and kubectl it runs), never in an argument.
-      OPENAI_API_KEY=$(<"$key") kagent ${lib.escapeShellArgs installArgs}
+      OPENAI_API_KEY=$(<"$key") kagent --config ${cliConfig} ${lib.escapeShellArgs installArgs}
 
       kubectl -n ${namespace} create configmap ${marker} \
         --from-literal=stamp="$stamp" --from-literal=version=${kagent.version} \
@@ -288,13 +336,12 @@ in
 
     dataNode = lib.mkOption {
       type = lib.types.str;
-      default = config.networking.hostName;
-      defaultText = lib.literalExpression "config.networking.hostName";
+      example = "node1";
       description = ''
         The node (k3s names nodes after their hosts) whose local disk holds
         the bundled PostgreSQL's and RustFS's volumes, in
-        /var/lib/kagent; both pods run there. Every server of the cluster
-        must set the same value: each deploys the same manifest.
+        /var/lib/kagent; both pods run there. No default: every server of
+        the cluster deploys the same manifest and must set the same value.
       '';
     };
   };

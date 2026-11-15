@@ -89,6 +89,7 @@
             backfabric.kagent = {
               enable = true;
               model = "gpt-5-mini";
+              dataNode = "example";
             };
           }
         ];

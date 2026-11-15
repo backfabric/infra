@@ -12,7 +12,7 @@ backfabric.kagent = {
   enable = true;
   model = "gpt-5-mini";                    # the default: the installer's choice
   apiKeySecret = "kagent-openai-api-key";  # the default, in secrets/common.yaml
-  dataNode = "node1";                      # the default: this host's name
+  dataNode = "node1";                      # required, the same on every server
 };
 ```
 
@@ -180,12 +180,19 @@ ssh -N -L 8082:localhost:8082 node1                                 # locally, t
 
 ### An agent over A2A
 
-An acceptance check of the platform: an agent on the installed `codex-default` Harness and
-`default-model-config`, and a conversation over A2A JSON-RPC (port 8083,
-`POST /agents/<namespace>/<name>`, header `A2A-Version: 1.0` required). On
-a server, as root:
+An acceptance check of the platform: an agent on the installed
+`codex-default` Harness and `default-model-config`, a conversation over
+A2A JSON-RPC (port 8083, `POST /agents/<namespace>/<name>`, header
+`A2A-Version: 1.0` required), and kagent's SessionService over gRPC (the
+controller serves reflection). On a server, as root, in one shell; the
+tools come from nixpkgs into `/root/kagent-check` (GC roots), so the
+blocks can be pasted as they are:
 
 ```sh
+mkdir -p /root/kagent-check
+export PATH=$(nix --extra-experimental-features 'nix-command flakes' build --print-out-paths \
+  --out-link /root/kagent-check/tools nixpkgs#curl nixpkgs#jq nixpkgs#grpcurl | sed 's|$|/bin|' | paste -sd:):$PATH
+
 kubectl apply -f - <<'EOF'
 apiVersion: api.kagent.dev/v1alpha3
 kind: AgentTemplate
@@ -204,8 +211,12 @@ EOF
 kubectl wait --for=condition=Ready agent/codex-agent -n kagent --timeout=600s
 
 kubectl -n kagent port-forward svc/kagent-controller 8083:8083 >/dev/null 2>&1 &
+PF=$!
 A2A=http://localhost:8083/agents/kagent/codex-agent
 HDRS=(-H 'Content-Type: application/json' -H 'A2A-Version: 1.0' -H 'X-User-Id: admin@kagent.dev')
+# Ready when the agent card answers (at most 30 s).
+for i in $(seq 30); do curl -fsS "${HDRS[@]}" "$A2A/.well-known/agent-card.json" >/dev/null 2>&1 && break; sleep 1; done
+curl -fsS "${HDRS[@]}" "$A2A/.well-known/agent-card.json" | jq '{name, capabilities}'
 send() {  # send <text> [<contextId>]
   jq -n --arg mid "$(cat /proc/sys/kernel/random/uuid)" --arg text "$1" --arg ctx "${2-}" \
     '{jsonrpc: "2.0", id: "1", method: "SendMessage",
@@ -221,29 +232,34 @@ send "What was the question I just asked you?" "$SESSION_ID" |
 ```
 
 The first Agent on a template waits for a golden snapshot (minutes). The
-first reply is `TASK_STATE_COMPLETED` with `42`; the second has the same
-`contextId` (the session) and mentions "7 times 6". A missing
-`A2A-Version` header gives a `version not supported` error.
+agent card lists `capabilities.streaming: true`. The first reply is
+`TASK_STATE_COMPLETED` with `42`; the second has the same `contextId`
+(the session) and mentions "7 times 6". A missing `A2A-Version` header
+gives a `version not supported` error.
 
 Sessions are suspended between turns and resumed for the next one, inside
-the long-lived worker pod. kagent's SessionService shows it (with
-`nix shell nixpkgs#grpcurl`; the controller serves gRPC reflection):
+the long-lived worker pod. In the same shell:
 
 ```sh
 sess() { grpcurl -plaintext -H 'X-User-Id: admin@kagent.dev' -d '{"session_id":"'"$SESSION_ID"'"}' \
   localhost:8083 kagent.api.v1.SessionService/GetSession | jq -r '.session | "\(.state) \(.operation // "")"'; }
 sess                                          # RUNTIME_STATE_SUSPENDED
-send "One more: what is 9 times 9?" "$SESSION_ID" > /tmp/reply3.json &
-for i in $(seq 10); do sess; sleep 2; done; wait
-jq -r '[.result.task.artifacts[]?.parts[]?.text] | join(" ")' /tmp/reply3.json   # 81
+send "One more: what is 9 times 9?" "$SESSION_ID" > /root/kagent-check/reply3.json &
+TURN=$!
+for i in $(seq 10); do sess; sleep 2; done; wait "$TURN"
+jq -r '[.result.task.artifacts[]?.parts[]?.text] | join(" ")' /root/kagent-check/reply3.json   # 81
 sess                                          # RUNTIME_STATE_SUSPENDED
 kubectl -n kagent get pods -l ate.dev/worker-pool                                 # the same worker pod(s) throughout
 ```
 
 During the turn the state is `RUNTIME_STATE_READY` with an operation.
-Delete the check's agent afterwards (`kubectl -n kagent delete
-agent/codex-agent agenttemplate/codex-template`) and stop the
-port-forward.
+Afterwards, remove the check's agent, the port-forward and the tools:
+
+```sh
+kubectl -n kagent delete agent/codex-agent agenttemplate/codex-template
+kill "$PF"
+rm -rf /root/kagent-check
+```
 
 ## Upgrading
 
@@ -290,9 +306,38 @@ The unit's log names the step; `kagent install` names the failing release.
 - `start port-forward`: after installing, the CLI checks the controller
   through `kubectl port-forward` on `localhost:8083` of the server; the port
   must be free.
+- `Helm releases left pending by an interrupted install: …`: see below.
 
 After fixing the cause, `systemctl start kagent-install` (or deploy again)
 runs the install again; what exists is upgraded, not recreated.
+
+### A release stuck in pending
+
+An install killed in the middle of a Helm step (a reboot, the unit's
+timeout, a lost API server) can leave that release in `pending-install`,
+`pending-upgrade` or `pending-rollback`; Helm then refuses every later
+operation on it ("another operation (install/upgrade/rollback) is in
+progress"). The unit checks for this before it installs and fails naming
+the release. Recover it by hand, while no install runs (`systemctl
+is-active kagent-install` on every server says `inactive` or `failed`), as
+root with `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` and helm from
+`nix shell nixpkgs#kubernetes-helm`:
+
+```sh
+helm list --all-namespaces --pending                 # the release, its namespace and status
+helm history <release> -n <namespace>                # the revisions
+```
+
+- `pending-upgrade` or `pending-rollback`: roll back to the last deployed
+  revision, `helm rollback <release> <revision> -n <namespace> --wait`
+  (the last revision whose status is `deployed` or `superseded`).
+- `pending-install` (the release's first revision, so nothing of it was
+  ever deployed): remove it, `helm uninstall <release> -n <namespace>
+  --wait`. For `kagent-crds` or `substrate-crds` this deletes the CRDs
+  it created, which hold nothing yet at a first install.
+
+Then `systemctl start kagent-install`: the installer runs its steps
+again.
 
 ## Turn off
 
