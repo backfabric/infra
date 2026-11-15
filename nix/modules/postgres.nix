@@ -12,9 +12,8 @@
 #     the largest (clusters), so k3s applies them as they are;
 #   - one instance, PostgreSQL from CloudNativePG's minimal image (pinned by
 #     digest), on a static `local` PersistentVolume in
-#     /var/lib/postgres-platform bound to the instance's claim by name, as
-#     Substrate's volumes. No StorageClass object exists and no provisioner
-#     serves the class name;
+#     /var/lib/postgres-platform bound to the instance's claim by name. No
+#     StorageClass object exists and no provisioner serves the class name;
 #   - CloudNativePG's defaults: TLS with its own CA, which it renews; pods
 #     that pass Pod Security `restricted`. Superuser access over the network
 #     off (`enableSuperuserAccess: false`);

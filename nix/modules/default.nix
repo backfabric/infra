@@ -56,18 +56,6 @@ inputs: {
       ./otel.nix
     ];
   };
-  # Also imports the subsystems it reads options of or configures (the
-  # cluster-wide sops file, k3s's package, flags, manifests and Pod Security
-  # exemptions, and the node address k3s reads).
-  substrate = {
-    imports = [
-      inputs.sops-nix.nixosModules.sops
-      ./secrets.nix
-      ./network.nix
-      ./k3s.nix
-      ./substrate.nix
-    ];
-  };
   # Also imports the subsystems k3s's module reads options of, and k3s's,
   # whose package and manifests it configures.
   postgres = {

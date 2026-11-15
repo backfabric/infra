@@ -1,3 +1,7 @@
+---
+status: superseded by ADR 0029
+---
+
 # The dispatcher: one A2A front door for agent tasks
 
 Every task for an agent enters through one service, the dispatcher: a Go service in the top-level directory `dispatcher/` ([a2a-go](https://github.com/a2aproject/a2a-go) v2, the Hatchet Go SDK, Substrate's Go `ateapi` client), running in the cluster in its own namespace under Pod Security `restricted`, with its image pinned by digest and its database `dispatcher` from `backfabric.postgres.databases` (ADR 0025; it retries connecting at startup). [A2A](https://a2a-protocol.org/) (spec v1.0) is the only protocol: channel adapters, humans and agents call the dispatcher, and the dispatcher calls the agents, which run as Substrate actors (ADR 0023), one actor per agent session (an A2A `contextId`). No caller reaches an actor directly, and the dispatcher has no public ingress. The first version:

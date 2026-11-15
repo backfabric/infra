@@ -1,5 +1,5 @@
 ---
-status: amended by ADR 0026 and ADR 0028
+status: superseded by ADR 0029
 ---
 
 # CI builds and publishes the agent image

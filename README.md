@@ -1,7 +1,10 @@
 # backfabric/infra
 
 NixOS modules for running an encrypted k3s cluster on Hetzner bare metal,
-intended as the substrate for running agents.
+intended as the base for running agents. The agents' platform is to be
+kagent behind agentgateway, deployed by Nix as upstream charts
+([ADR 0029](docs/adr/0029-kagent-agent-platform.md)); it is not installed
+yet.
 
 This flake is public and contains no host-specific data. Concrete hosts, IP
 addresses, and secrets live in a separate private repository that consumes
@@ -23,8 +26,7 @@ requires them there for the flake to be `github:backfabric/infra`.
   consumers only import modules from this flake.
 - `nixosModules.default` imports every subsystem module.
 - `nix/packages/`: what subsystem modules deploy and build from upstream
-  releases, e.g. Agent Substrate (patched manifests, images) and
-  CloudNativePG's manifest with its images pinned by digest.
+  releases, e.g. CloudNativePG's manifest with its images pinned by digest.
 - `nix/fleet/`: the fleet dev shell for the operator machine,
   `lib.mkFleetShell { pkgs, nixosConfigurations }`, with a generated SSH
   config and the operator command `backfabric` (`nix/fleet/cli/`; subcommands
@@ -42,11 +44,6 @@ requires them there for the flake to be `github:backfabric/infra`.
 - `nix/templates/default/`: the skeleton of the private repository, see below;
   evaluated by `checks.x86_64-linux.template-empty` and
   `checks.x86_64-linux.template-with-host`.
-- `nix/images/`: the agents' container image `ghcr.io/backfabric/agent`
-  (Codex behind the A2A supervisor, run as an Agent Substrate actor),
-  `packages.x86_64-linux.agent-image`, built and published by CI, see
-  [docs/agent-image.md](docs/agent-image.md).
-- `agent/`: the image's supervisor, which serves A2A 1.0 and runs Codex.
 - `website/`: the project website at <https://backfabric.dev> (Eleventy),
   generated from this README, the template's README, and `docs/`;
   `packages.<system>.website` (`nix/website.nix`), published to GitHub
@@ -59,8 +56,6 @@ requires them there for the flake to be `github:backfabric/infra`.
   [OpenBao](docs/openbao.md),
   [the audit telemetry collector](docs/otel.md),
   [the platform PostgreSQL](docs/postgres.md),
-  [the agent image](docs/agent-image.md),
-  [Agent Substrate](docs/substrate.md),
   [Flux](docs/flux.md);
   architectural decisions in [docs/adr/](docs/adr/).
 
@@ -124,9 +119,7 @@ nix flake init -t github:backfabric/infra
   the last 5, in `/var/lib/rancher/k3s/server/db/snapshots`). Hardened as
   the [K3s CIS hardening guide](https://docs.k3s.io/security/hardening-guide)
   says: `protect-kernel-defaults` with its kernel parameters, Pod Security
-  Admission `restricted` outside kube-system and the namespaces subsystems
-  exempt (`backfabric.k3s.podSecurityExemptions`, each limited to
-  digest-pinned images, ADR 0024), EventRateLimit, every API
+  Admission `restricted` outside kube-system, EventRateLimit, every API
   request audited at level Metadata to
   `/var/lib/rancher/k3s/server/logs/audit.log`. Nothing in the cluster is
   reachable from outside: the firewall opens port 6443 only on `cni0`, for
@@ -178,16 +171,6 @@ nix flake init -t github:backfabric/infra
   credentials, and writes everything to an append-only archive of OTLP JSON
   lines in `/var/log/otel-collector` (root only, one file per signal,
   rotated at 100 MB, kept 365 days). See [docs/otel.md](docs/otel.md).
-- `substrate` (off unless `backfabric.substrate.enable`):
-  [Agent Substrate](https://github.com/agent-substrate/substrate) v1.0.0
-  ([ADR 0023](docs/adr/0023-agent-substrate-runtime.md)), installed by its
-  own `ate-setup` from the release's images at every deployment that
-  changes it, with the beta Kubernetes features its pod certificates need,
-  gVisor sandboxes only, its bundled PostgreSQL and a RustFS S3 server for
-  snapshots in `ate-system` on static local volumes in `/var/lib/substrate`,
-  and `kubectl ate` on the host. `ate-system` and the namespaces of
-  `workerPoolNamespaces` are exempt from Pod Security; their pods may only
-  run digest-pinned images. See [docs/substrate.md](docs/substrate.md).
 - `postgres` (off by default): a PostgreSQL for platform services in the
   cluster, run by [CloudNativePG](https://cloudnative-pg.io/)
   ([ADR 0025](docs/adr/0025-platform-postgres-with-cloudnativepg.md)) from
@@ -217,8 +200,7 @@ nix flake init -t github:backfabric/infra
 
 ## Checks
 
-CI evaluates; the only things it builds are the agent image
-([ADR 0022](docs/adr/0022-ci-builds-the-agent-image.md)) and the website
+CI evaluates; the only thing it builds is the website
 ([ADR 0026](docs/adr/0026-project-website-in-the-repository.md)). Run the
 same checks locally with:
 

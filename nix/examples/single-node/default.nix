@@ -59,15 +59,6 @@
     kv.secrets."example/app".password = "example-app-password";
   };
 
-  # Agent Substrate on the cluster (docs/substrate.md), its RustFS
-  # credentials from `secrets/common.yaml`: WorkerPools in the namespace
-  # `agents`, and the smoke test.
-  backfabric.substrate = {
-    enable = true;
-    workerPoolNamespaces = [ "agents" ];
-    smokeTest.enable = true;
-  };
-
   # The platform PostgreSQL with one database, whose credentials go to the
   # Secret `postgres-example` in the namespace `example`.
   backfabric.postgres = {
