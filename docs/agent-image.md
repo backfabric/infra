@@ -120,7 +120,8 @@ rules:
 ```
 
 At every start the supervisor writes `/home/agent/.codex/config.toml` (only
-when it differs; the file is the supervisor's, edits are overwritten):
+when it differs; the file is the supervisor's, edits are overwritten), here
+without its comment lines:
 
 ```toml
 model_provider = "openai-api"

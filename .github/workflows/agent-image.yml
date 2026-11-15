@@ -101,7 +101,8 @@ jobs:
           # The session uses the configured provider; the next message
           # continues it: the same session, one rollout.
           session=$(docker exec agent cat /home/agent/codex-session)
-          send m2 'What did I ask?' | jq --exit-status '.body.result.task.status.state == "TASK_STATE_FAILED"'
+          send m2 'What did I ask?' |
+            jq --exit-status '.body.result.task.status | .state == "TASK_STATE_FAILED" and (.message.parts[0].text | contains("Connection failed"))'
           docker exec agent cat /home/agent/codex-session | grep --line-regexp "$session"
           docker exec agent sh -c 'ls "$CODEX_HOME"/sessions/*/*/*/rollout-*.jsonl' | tee rollouts.txt
           test "$(wc -l <rollouts.txt)" -eq 1
