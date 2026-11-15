@@ -73,7 +73,8 @@ let
   # `allowedResources` says: rights (RBAC, service account tokens), the
   # namespace object itself (its Pod Security labels), credentials, Flux's
   # own kinds (another source, image automation writing to Git, or another
-  # identity), and wildcards.
+  # identity), k3s's HelmCharts (its helm-controller runs each chart's
+  # install job as cluster-admin), and wildcards.
   deniedGroups = [
     "*"
     "rbac.authorization.k8s.io"
@@ -84,6 +85,7 @@ let
     "notification.toolkit.fluxcd.io"
     "image.toolkit.fluxcd.io"
     "fluxcd.controlplane.io"
+    "helm.cattle.io"
   ];
   deniedResources = [
     "*"
@@ -153,7 +155,10 @@ let
         # health checks (fluxcd/pkg/ssa v0.83.0): GET the object
         # (manager_apply.go, manager_diff.go), server-side apply PATCH, which
         # needs `create` when the object is new, and GET plus DELETE to prune
-        # or recreate (manager_delete.go). Nothing lists or watches.
+        # or recreate (manager_delete.go). Nothing lists or watches, as long
+        # as no allowed kind ends in `Class`: those go to a stage of their own
+        # that waits for them (ApplyAllStaged, utils.IsClassDefinition), which
+        # lists and watches.
         rules = map (r: {
           apiGroups = [ r.apiGroup ];
           inherit (r) resources;
@@ -200,10 +205,10 @@ let
           ref.branch = cfg.repository.branch;
           interval = "1m";
           secretRef.name = credentialsSecret;
-          # Only the agents' directory is fetched: the kustomize build, rooted
-          # at the artifact, cannot read the rest of the private repository
-          # (source-controller v1.10.1, api/v1/gitrepository_types.go,
-          # `SparseCheckout`).
+          # Only the agents' directory is checked out (the clone downloads
+          # the whole commit): the artifact, and so the kustomize build,
+          # cannot read the rest of the private repository (source-controller
+          # v1.10.1, api/v1/gitrepository_types.go, `SparseCheckout`).
           sparseCheckout = [ "${sparseDir}/" ];
         };
       }
@@ -286,7 +291,8 @@ in
         example = "./agents/node1";
         description = ''
           The directory of the repository Flux applies into the namespace
-          `agents`, and the only one it fetches: a
+          `agents`, and the only one checked out (the clone downloads the
+          whole commit; the build can read only this directory): a
           kustomization or plain manifests. Everything Flux applied from it
           and that is removed from it is deleted (prune).
         '';
@@ -315,7 +321,7 @@ in
       assertions = [
         {
           assertion = deniedRules == [ ];
-          message = "backfabric.flux.allowedResources must not contain RBAC, Namespaces, Secrets, ServiceAccounts, Flux's kinds or wildcards: ${builtins.toJSON deniedRules}";
+          message = "backfabric.flux.allowedResources must not contain RBAC, Namespaces, Secrets, ServiceAccounts, Flux's kinds, k3s's HelmCharts or wildcards: ${builtins.toJSON deniedRules}";
         }
         {
           assertion =

@@ -47,17 +47,21 @@ never lists or watches. The API server refuses everything else:
 - objects in any other namespace, and cluster-scoped kinds (Namespaces,
   ClusterRoles, CRDs, webhooks), including the Namespace `agents` itself
   (its Pod Security labels);
-- RBAC, Namespaces, Secrets, ServiceAccounts, and Flux's own kinds
-  (sources, Kustomizations and HelmReleases with another
-  `serviceAccountName`, image automation, `source.extensions.fluxcd.io`):
-  these may not be listed in `allowedResources` at all, evaluation fails;
+- RBAC, Namespaces, Secrets, ServiceAccounts, Flux's own kinds (sources,
+  Kustomizations and HelmReleases with another `serviceAccountName`,
+  image automation, `source.extensions.fluxcd.io`), and k3s's HelmCharts
+  (`helm.cattle.io`: k3s's helm-controller runs each chart's install job
+  as cluster-admin): these may not be listed in `allowedResources` at all,
+  evaluation fails;
 - pods that break Pod Security `restricted` (the cluster's default, also
   in `agents`).
 
-The GitRepository fetches only `path` (`spec.sparseCheckout`,
-source-controller v1.10.1): the kustomize build cannot read other files
-of the private repository (`hosts/`, `secrets/`), even through a relative
-path. `path` must exist in the branch, or the GitRepository is not Ready.
+The GitRepository checks out only `path` (`spec.sparseCheckout`,
+source-controller v1.10.1): the clone downloads the whole commit, but the
+artifact, and so the kustomize build, holds only `path` and cannot read
+other files of the private repository (`hosts/`, `secrets/`), even
+through a relative path. `path` must exist in the branch, or the
+GitRepository is not Ready.
 
 What remains possible inside the rights: server-side apply forces
 ownership, so the directory can take over, change and then prune any
