@@ -1,3 +1,7 @@
+---
+status: superseded by ADR 0029
+---
+
 # Pod Security exemptions in exchange for pinned images
 
 Amends ADR 0017. Some workloads the cluster must run cannot pass Pod Security `restricted`, or even `baseline`: agent runtimes whose node agents run as root with host paths, whose sandboxed workers need SYS_ADMIN and NET_ADMIN with seccomp and AppArmor Unconfined. Pod Security Admission can only exempt them by namespace, user or runtime class, and then admits anything in that namespace.
