@@ -189,9 +189,11 @@ nix flake init -t github:backfabric/infra
   run digest-pinned images. Egress credential injection
   ([ADR 0030](docs/adr/0030-egress-injected-model-keys.md)) only for the
   `credentials` declared: each from sops into a Secret in
-  `agent-credentials`, which only Substrate's credential provider reads and
-  only the listed atespaces may use, so agents reach their model with a key
-  they never hold. See [docs/substrate.md](docs/substrate.md).
+  `agent-credentials`, which of Substrate's components only its credential
+  provider reads (cluster admins and controllers that read Secrets
+  everywhere, such as CloudNativePG's operator, can too) and only the listed
+  atespaces may use, so agents reach their model with a key they never
+  hold. See [docs/substrate.md](docs/substrate.md).
 - `postgres` (off by default): a PostgreSQL for platform services in the
   cluster, run by [CloudNativePG](https://cloudnative-pg.io/)
   ([ADR 0025](docs/adr/0025-platform-postgres-with-cloudnativepg.md)) from

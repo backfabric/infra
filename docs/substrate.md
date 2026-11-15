@@ -372,10 +372,11 @@ With one credential or more:
   provider reads its policy only at startup, sets the policy's hash on the
   provider's pod template, which restarts it only when the policy changed.
 
-`substrate-credentials` runs at every deployment, at boot, after every run
-of `substrate-install`, and when a credential's sops secret changes
-(sops-nix restarts it). Rotating a key: replace the value in sops, commit,
-deploy; the next request uses the new key.
+`substrate-credentials` runs at every deployment (after `substrate-install`
+when that runs too, so it sees a provider ate-setup has just redeployed;
+not when `substrate-install` fails), at boot, and when a credential's sops
+secret changes (sops-nix restarts it). Rotating a key: replace the value in
+sops, commit, deploy; the next request uses the new key.
 
 An actor uses a credential with an `https` rule whose `replaceHeaders`
 names it as `ate-secret://k8s.io/default/agent-credentials/<name>/value`
@@ -541,6 +542,8 @@ Remove everything, in this order, as root on the host:
    kubectl delete validatingadmissionpolicy sandboxconfig-assets --ignore-not-found
    kubectl delete clusterrolebinding ate-api-server ate-controller atelet podcert-ate-dev-signer --ignore-not-found
    kubectl delete clusterrole ate-api-server ate-controller atelet podcert-ate-dev-signer --ignore-not-found
+   # The credentials' Secrets, so that no key stays in etcd.
+   kubectl delete namespace agent-credentials --ignore-not-found
    ```
 
 4. Delete the data on the host (irreversible; the snapshots hold the agents'
@@ -548,7 +551,7 @@ Remove everything, in this order, as root on the host:
    Then check that nothing of Substrate is left:
 
    ```sh
-   kubectl get ns                           # no ate-system, podcertificate-controller-system or WorkerPool namespaces
+   kubectl get ns                           # no ate-system, podcertificate-controller-system, agent-credentials or WorkerPool namespaces
    kubectl get crd | grep ate.dev           # nothing
    kubectl get clusterrole,clusterrolebinding,validatingadmissionpolicy | grep -E 'ate-|atelet|podcert|sandboxconfig'   # nothing
    kubectl get pv                           # no postgres, rustfs

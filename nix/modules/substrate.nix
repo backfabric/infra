@@ -994,11 +994,13 @@ in
         };
       };
 
-      # Runs at every deployment (as postgres-credentials), at boot, when a
-      # credential's sops secret changes (restartUnits), and again after
-      # each run of substrate-install (Requires), which may have redeployed
-      # the provider. No Restart=: waits for what it needs for a bounded
-      # time and then fails, so that a deployment reports it.
+      # Runs at every deployment (as postgres-credentials: an inactive
+      # oneshot wanted by multi-user.target is started again), after
+      # substrate-install when that runs in the same deployment (After), and
+      # not at all when substrate-install fails (Requires); at boot; and when
+      # a credential's sops secret changes (restartUnits). No Restart=: waits
+      # for what it needs for a bounded time and then fails, so that a
+      # deployment reports it.
       systemd.services.substrate-credentials = lib.mkIf injection {
         description = "Write Agent Substrate's egress credentials and the provider's policy";
         wantedBy = [ "multi-user.target" ];
