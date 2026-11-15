@@ -29,7 +29,8 @@ backfabric.flux = {
 ## What runs, and what is ours
 
 Everything in the cluster is upstream: the operator's chart as published
-(only `image.tag` is set, to the same version pinned by digest), and the
+(two values: `image.tag`, the same version pinned by digest, and
+`web.enabled = false`), and the
 Flux distribution the operator renders from the data in its image,
 including Flux's NetworkPolicies (`allow-egress`, `allow-scraping`,
 `allow-webhooks`) and its namespace labels (Pod Security `warn:
@@ -40,6 +41,13 @@ Ours is `nix/modules/flux.nix`: the FluxInstance (version, registry, and
 the sync block), and the Secret rendered from sops. The chart and its
 hash, the operator image digest, and the Flux version are pinned there;
 an upgrade is a change of those values and a deployment.
+
+The operator's status web UI is off: upstream serves it without
+authentication, with the operator's cluster-admin service account, and
+admits port 9080 from every namespace. Turning it on is a deliberate
+change of the chart values in `nix/modules/flux.nix` (`web.enabled`, with
+authentication per the operator's web UI docs), reached through
+`kubectl -n flux-system port-forward svc/flux-operator 9080`.
 
 The Kustomization applies with the controllers' own identity
 (cluster-admin, Flux's single-tenant default): whoever can push to the
@@ -224,4 +232,8 @@ ssh node1 kubectl -n flux-system delete fluxinstance flux --wait
 backfabric deploy node1
 ```
 
-The deployment restarts k3s (its `--disable` list changes).
+The deployment restarts k3s (its `--disable` list changes). Deploy right
+after deleting the FluxInstance: k3s applies every manifest again when it
+restarts (and retries a failing one every 15 s), so a k3s restart in
+between would bring the FluxInstance back. Afterwards
+`kubectl -n kube-system get addon` shows no `flux-*` Addon left.

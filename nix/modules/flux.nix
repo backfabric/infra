@@ -164,7 +164,15 @@ in
           inherit (operator) version hash;
           targetNamespace = namespace;
           createNamespace = true;
-          values.image.tag = operator.imageTag;
+          values = {
+            image.tag = operator.imageTag;
+            # The operator's status web UI: no authentication by default,
+            # served with the operator's cluster-admin service account, and
+            # the chart's `flux-operator-web` NetworkPolicy admits port 9080
+            # from every namespace. Off; the chart then renders neither the
+            # policy nor the UI's roles (WEB_SERVER_PORT=0).
+            web.enabled = false;
+          };
         };
         manifests = k3sManifests;
       };
