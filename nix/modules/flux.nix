@@ -1,26 +1,36 @@
-# Flux (ADR 0027): GitOps for everything inside the cluster. Nix keeps the
-# host, the disks, the network, k3s, and this bootstrap; Flux applies one
-# directory of the private repository to the cluster and keeps it there.
-# See docs/flux.md.
+# Flux (ADR 0027): delivers the agents, and only them, from the private
+# repository; Nix delivers the host, k3s and the platform. See
+# docs/flux.md.
 #
 #   - the Flux Operator (controlplaneio-fluxcd), Flux's documented way to
 #     install Flux declaratively without `flux bootstrap` writing into the
 #     repository: its upstream Helm chart, fetched at build time with a hash
 #     and installed by k3s's Helm controller (`autoDeployCharts`), its image
-#     pinned by digest in the chart's values;
+#     pinned by digest in the chart's values, its web UI off;
 #   - one FluxInstance, `flux-system/flux`, deployed by k3s: the operator
 #     installs Flux at the exact version given (the controller images pinned
 #     by digest from the distribution data in the operator's image), with
-#     upstream's default components and NetworkPolicies, and generates the
-#     GitRepository and the Kustomization (prune) that sync
-#     `repository.path` of `repository.url`, both named `flux-system` as
-#     `flux bootstrap` names them. The Kustomization applies with the
-#     controllers' own identity (cluster-admin): the private repository is
-#     trusted as much as the host configuration it holds;
+#     upstream's default components and NetworkPolicies, and Flux's
+#     multi-tenancy lockdown (`cluster.multitenant`): the controllers
+#     impersonate a service account of the object's namespace (`default`
+#     unless the object names one), never use their own cluster-admin
+#     identity for a Flux object, refuse cross-namespace references and
+#     remote kustomize bases. No `sync`: the operator's sync Kustomization
+#     would run as kustomize-controller (cluster-admin);
+#   - the agents: the namespace `namespace` (created here, Pod Security
+#     `restricted` as every namespace) and, in `flux-system`, a
+#     GitRepository and a Kustomization that apply `repository.path` of
+#     `repository.url` (prune) as the service account
+#     `flux-system/flux-agents`, whose only rights are a Role in
+#     `namespace` with `allowedResources`. Everything else a commit asks
+#     for (another namespace, cluster-scoped kinds, RBAC, Secrets, Flux's
+#     own kinds) is refused by the API server. The source, the credential
+#     and the service account stay in `flux-system`, out of reach of what
+#     runs in `namespace`;
 #   - the Git credential: a GitHub token from sops (`repository.tokenSecret`
-#     in the cluster-wide sops file), rendered by sops-nix into the Secret
-#     `flux-system/flux-system` in /run/secrets/rendered and deployed by k3s
-#     from there, never in the Nix store, an argument, or a log.
+#     in the cluster-wide sops file), rendered by sops-nix into a Secret in
+#     /run/secrets/rendered and deployed by k3s from there, never in the Nix
+#     store, an argument, or a log.
 #
 # Off by default; turned off, k3s removes what the manifests applied
 # (docs/flux.md, "Turn off", for the order).
@@ -32,7 +42,8 @@
 let
   cfg = config.backfabric.flux;
 
-  namespace = "flux-system";
+  fluxNamespace = "flux-system";
+  inherit (cfg) namespace;
 
   # The operator's chart and image: a chart release and its appVersion.
   # Bumping the version changes the image in the values, so k3s's Helm
@@ -49,40 +60,201 @@ let
   # (config/data/flux-images): no automatic upgrades.
   fluxVersion = "2.10.0";
 
-  # The Secret the GitRepository authenticates with, named as `flux
-  # bootstrap` names it.
-  credentialsSecret = "flux-system";
+  # The tenant's objects: its service account, the Secret its
+  # GitRepository authenticates with, and the source and Kustomization.
+  serviceAccount = "flux-agents";
+  credentialsSecret = "flux-git-credentials";
+  sync = "agents";
+
+  # Kinds the private repository must never manage, whatever
+  # `allowedResources` says: rights (RBAC, service account tokens),
+  # credentials, Flux's own kinds (another source or another identity), and
+  # wildcards.
+  deniedGroups = [
+    "*"
+    "rbac.authorization.k8s.io"
+    "source.toolkit.fluxcd.io"
+    "kustomize.toolkit.fluxcd.io"
+    "helm.toolkit.fluxcd.io"
+    "notification.toolkit.fluxcd.io"
+    "fluxcd.controlplane.io"
+  ];
+  deniedResources = [
+    "*"
+    "secrets"
+    "serviceaccounts"
+    "serviceaccounts/token"
+  ];
+  deniedRules = lib.filter (
+    r: lib.elem r.apiGroup deniedGroups || lib.intersectLists r.resources deniedResources != [ ]
+  ) cfg.allowedResources;
 
   # The k3s manifests this module deploys, by name: deployed while it is
   # enabled, and removed (backfabric.k3s.removedManifests) while it is not.
+  # k3s retries a file that fails every 15 s, so each waits for what it
+  # needs (the operator's CRD, Flux's CRDs, the namespace).
   k3sManifests = {
     flux-instance.content = {
       apiVersion = "fluxcd.controlplane.io/v1";
       kind = "FluxInstance";
       metadata = {
         name = "flux";
-        inherit namespace;
+        namespace = fluxNamespace;
       };
       spec = {
         distribution = {
           version = fluxVersion;
           registry = "ghcr.io/fluxcd";
         };
-        sync = {
-          kind = "GitRepository";
-          inherit (cfg.repository) url path;
-          ref = "refs/heads/${cfg.repository.branch}";
-          pullSecret = credentialsSecret;
-        };
+        # tenantDefaultServiceAccount stays `default`: a Flux object that
+        # names no service account gets the rights of its namespace's
+        # `default` account, i.e. none.
+        cluster.multitenant = true;
       };
     };
+
+    flux-agents.content = [
+      {
+        apiVersion = "v1";
+        kind = "Namespace";
+        metadata.name = namespace;
+      }
+      {
+        apiVersion = "v1";
+        kind = "ServiceAccount";
+        metadata = {
+          name = serviceAccount;
+          namespace = fluxNamespace;
+        };
+        automountServiceAccountToken = false;
+      }
+      {
+        apiVersion = "rbac.authorization.k8s.io/v1";
+        kind = "Role";
+        metadata = {
+          name = serviceAccount;
+          inherit namespace;
+        };
+        # Server-side apply is a PATCH (that may create), diff and dry-run
+        # GET, prune DELETE; no UPDATE.
+        rules = map (r: {
+          apiGroups = [ r.apiGroup ];
+          inherit (r) resources;
+          verbs = [
+            "get"
+            "list"
+            "watch"
+            "create"
+            "patch"
+            "delete"
+          ];
+        }) cfg.allowedResources;
+      }
+      {
+        apiVersion = "rbac.authorization.k8s.io/v1";
+        kind = "RoleBinding";
+        metadata = {
+          name = serviceAccount;
+          inherit namespace;
+        };
+        roleRef = {
+          apiGroup = "rbac.authorization.k8s.io";
+          kind = "Role";
+          name = serviceAccount;
+        };
+        subjects = [
+          {
+            kind = "ServiceAccount";
+            name = serviceAccount;
+            namespace = fluxNamespace;
+          }
+        ];
+      }
+    ];
+
+    flux-agents-sync.content = [
+      {
+        apiVersion = "source.toolkit.fluxcd.io/v1";
+        kind = "GitRepository";
+        metadata = {
+          name = sync;
+          namespace = fluxNamespace;
+        };
+        spec = {
+          inherit (cfg.repository) url;
+          ref.branch = cfg.repository.branch;
+          interval = "1m";
+          secretRef.name = credentialsSecret;
+        };
+      }
+      {
+        apiVersion = "kustomize.toolkit.fluxcd.io/v1";
+        kind = "Kustomization";
+        metadata = {
+          name = sync;
+          namespace = fluxNamespace;
+        };
+        spec = {
+          sourceRef = {
+            kind = "GitRepository";
+            name = sync;
+          };
+          inherit (cfg.repository) path;
+          interval = "10m";
+          prune = true;
+          serviceAccountName = serviceAccount;
+        };
+      }
+    ];
+
     flux-git-credentials.source = config.sops.templates."flux-git-credentials.yaml".path;
   };
   operatorChart = "flux-operator";
 in
 {
   options.backfabric.flux = {
-    enable = lib.mkEnableOption "Flux syncing the cluster from the private repository (docs/flux.md)";
+    enable = lib.mkEnableOption "Flux applying the agents from the private repository (docs/flux.md)";
+
+    namespace = lib.mkOption {
+      type = lib.types.strMatching "[a-z0-9]([-a-z0-9]*[a-z0-9])?";
+      default = "agents";
+      description = ''
+        The namespace the private repository's agents live in, created by
+        this module. Flux applies `repository.path` only into it, with the
+        rights of `allowedResources`.
+      '';
+    };
+
+    allowedResources = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            apiGroup = lib.mkOption {
+              type = lib.types.str;
+              example = "kagent.dev";
+              description = "The API group (`\"\"` for the core group).";
+            };
+            resources = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              example = [ "agents" ];
+              description = "Resource names (plural, lower case) in the group.";
+            };
+          };
+        }
+      );
+      default = [
+        {
+          apiGroup = "";
+          resources = [ "configmaps" ];
+        }
+      ];
+      description = ''
+        What the private repository may manage in `namespace`: the only
+        rules of the Role Flux applies `repository.path` with. RBAC, Secrets,
+        ServiceAccounts, Flux's own kinds and wildcards are refused at
+        evaluation.
+      '';
+    };
 
     repository = {
       url = lib.mkOption {
@@ -101,9 +273,9 @@ in
 
       path = lib.mkOption {
         type = lib.types.str;
-        example = "./clusters/node1";
+        example = "./agents/node1";
         description = ''
-          The directory of the repository Flux applies to the cluster: a
+          The directory of the repository Flux applies into `namespace`: a
           kustomization or plain manifests. Everything Flux applied from it
           and that is removed from it is deleted (prune).
         '';
@@ -129,6 +301,24 @@ in
       );
     }
     (lib.mkIf cfg.enable {
+      assertions = [
+        {
+          assertion = deniedRules == [ ];
+          message = "backfabric.flux.allowedResources must not contain RBAC, Secrets, ServiceAccounts, Flux's kinds or wildcards: ${builtins.toJSON deniedRules}";
+        }
+        {
+          assertion =
+            !lib.elem namespace [
+              "default"
+              "kube-system"
+              "kube-public"
+              "kube-node-lease"
+              fluxNamespace
+            ];
+          message = "backfabric.flux.namespace must be a namespace of its own, not ${namespace}";
+        }
+      ];
+
       sops.secrets.${cfg.repository.tokenSecret} = {
         sopsFile = config.backfabric.secrets.commonFile;
       };
@@ -144,7 +334,7 @@ in
           kind = "Secret";
           metadata = {
             name = credentialsSecret;
-            inherit namespace;
+            namespace = fluxNamespace;
           };
           stringData = {
             username = "git";
@@ -154,15 +344,12 @@ in
         restartUnits = [ "k3s.service" ];
       };
 
-      # The Secret and the FluxInstance wait for the namespace and the CRD
-      # the chart's release creates: k3s retries a file that fails every
-      # 15 s.
       services.k3s = {
         autoDeployCharts.${operatorChart} = {
           name = operatorChart;
           repo = operator.chart;
           inherit (operator) version hash;
-          targetNamespace = namespace;
+          targetNamespace = fluxNamespace;
           createNamespace = true;
           values = {
             image.tag = operator.imageTag;

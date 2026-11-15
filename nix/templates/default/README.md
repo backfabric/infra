@@ -356,13 +356,16 @@ There are no backups yet. Status, connecting, and turning it off:
 
 ## Flux
 
-Everything inside the cluster comes from this repository through
+The agents come from this repository through
 [Flux](https://github.com/backfabric/infra/blob/main/docs/flux.md): Flux
-applies `clusters/<host>/` and keeps the cluster equal to it (an object
-removed from the directory is deleted). The template has
-`clusters/node1/kustomization.yaml`, empty; rename the directory after your
-host. Your own objects (agents, host values) go there; application
-secrets stay in OpenBao, never in Git.
+applies `agents/<host>/` into the namespace `agents` and keeps it equal to
+it (an object removed from the directory is deleted). The template has
+`agents/node1/kustomization.yaml`, empty; rename the directory after your
+host. Flux may only manage the kinds of `backfabric.flux.allowedResources`
+(ConfigMaps until kagent's kinds are added) in `agents`; every object
+names `namespace: agents`, and anything else is refused. The platform
+itself is configured in Nix, not here; application secrets stay in
+OpenBao, never in Git.
 
 1. Push this repository to GitHub (private), if it is not there yet: Flux
    fetches from GitHub, so every change must be pushed.
@@ -378,7 +381,7 @@ secrets stay in OpenBao, never in Git.
      enable = true;
      repository = {
        url = "https://github.com/<owner>/<repository>";
-       path = "./clusters/node1";
+       path = "./agents/node1";
      };
    };
    ```
@@ -386,27 +389,14 @@ secrets stay in OpenBao, never in Git.
 5. Commit, push, deploy:
 
    ```sh
-   git add -A && git commit -m "feat: sync the cluster with Flux" && git push
+   git add -A && git commit -m "feat: deliver the agents with Flux" && git push
    backfabric deploy node1
    ```
 
 6. Check on the host: `kubectl -n flux-system get fluxinstance,gitrepository,kustomization`
-   shows all three Ready, the GitRepository at your latest commit. From now
-   on a push to `clusters/node1/` reaches the cluster within about a
-   minute, without a deployment.
-
-Platform components every fleet shares (upstream Helm charts as
-HelmReleases) come from `kubernetes/<component>/` of backfabric/infra: add
-`clusters/node1/backfabric.yaml` with a GitRepository for
-`https://github.com/backfabric/infra`, pinned to the `backfabric` commit of
-`flake.lock`, and a Flux Kustomization per component with your overlays,
-and list it in `kustomization.yaml`; see
-[bases from backfabric/infra](https://github.com/backfabric/infra/blob/main/docs/flux.md#bases-from-backfabricinfra).
-After `nix flake update backfabric`, move the commit in the same commit:
-
-```sh
-nix eval --raw --impure --expr '(builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.backfabric.locked.rev'
-```
+   shows all three Ready, the GitRepository `agents` at your latest
+   commit. From now on a push to `agents/node1/` reaches the cluster
+   within about a minute, without a deployment.
 
 ## Unlock after a reboot
 

@@ -81,13 +81,14 @@
     ];
   };
 
-  # Flux syncs `clusters/example` of the private repository into the
-  # cluster, with the token `flux-git-token` from `secrets/common.yaml`.
+  # Flux applies `agents/example` of the private repository into the
+  # namespace `agents` (ConfigMaps only, the default), with the token
+  # `flux-git-token` from `secrets/common.yaml`.
   backfabric.flux = {
     enable = true;
     repository = {
       url = "https://github.com/example/fleet";
-      path = "./clusters/example";
+      path = "./agents/example";
     };
   };
 

@@ -47,11 +47,6 @@ requires them there for the flake to be `github:backfabric/infra`.
   `packages.x86_64-linux.agent-image`, built and published by CI, see
   [docs/agent-image.md](docs/agent-image.md).
 - `agent/`: the image's supervisor, which serves A2A 1.0 and runs Codex.
-- `kubernetes/`: cluster content every fleet shares, one kustomize base
-  per component (upstream Helm charts as HelmReleases), applied by Flux
-  from the private repository through a GitRepository pinned to a commit
-  of this one, see [kubernetes/README.md](kubernetes/README.md) and
-  [docs/flux.md](docs/flux.md#bases-from-backfabricinfra).
 - `website/`: the project website at <https://backfabric.dev> (Eleventy),
   generated from this README, the template's README, and `docs/`;
   `packages.<system>.website` (`nix/website.nix`), published to GitHub
@@ -204,18 +199,21 @@ nix flake init -t github:backfabric/infra
   connect, and each gets a Secret with the connection details and a
   generated password. See [docs/postgres.md](docs/postgres.md).
 - `flux` (off unless `backfabric.flux.enable`): [Flux](https://fluxcd.io/)
-  applies one directory of the private repository to the cluster and keeps
-  it there: everything inside the cluster is delivered from Git, the host,
-  k3s and this bootstrap from Nix
-  ([ADR 0027](docs/adr/0027-flux-for-cluster-workloads.md)). The
+  delivers the agents, and only them, from a directory of the private
+  repository; the platform is delivered by Nix
+  ([ADR 0027](docs/adr/0027-flux-for-agents.md)). The
   [Flux Operator](https://fluxoperator.dev/) from its upstream Helm chart
-  (pinned by hash, image by digest), installed by k3s, and one FluxInstance
-  with an exact Flux version (controller images by digest), upstream's
-  NetworkPolicies, and the sync of `repository.path` of `repository.url`
-  (branch `repository.branch`, prune). The repository is fetched over HTTPS
-  with a read-only GitHub token, `flux-git-token` in
-  `backfabric.secrets.commonFile`, rendered into a Secret on the host
-  without entering the Nix store. See [docs/flux.md](docs/flux.md).
+  (pinned by hash, image by digest, web UI off), installed by k3s, and one
+  FluxInstance with an exact Flux version (controller images by digest),
+  upstream's NetworkPolicies, and Flux's multi-tenancy lockdown. Flux
+  applies `repository.path` of `repository.url` (branch
+  `repository.branch`, prune) as a service account whose only rights are
+  `allowedResources` (default: ConfigMaps) in `namespace` (default
+  `agents`, created by the module); anything else a commit asks for is
+  refused. The repository is fetched over HTTPS with a read-only GitHub
+  token, `flux-git-token` in `backfabric.secrets.commonFile`, rendered into
+  a Secret in `flux-system` without entering the Nix store. See
+  [docs/flux.md](docs/flux.md).
 
 ## Checks
 
