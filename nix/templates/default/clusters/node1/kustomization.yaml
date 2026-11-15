@@ -1,0 +1,7 @@
+# What Flux applies to node1's cluster (backfabric.flux.repository.path =
+# "./clusters/node1"); rename the directory after the host. List the files
+# of this directory, or subdirectories with their own kustomization.yaml.
+# An object removed from here is deleted from the cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []

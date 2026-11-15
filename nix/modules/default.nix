@@ -79,4 +79,16 @@ inputs: {
       ./postgres.nix
     ];
   };
+  # Also imports the subsystems it reads options of or configures (the
+  # cluster-wide sops file, k3s's charts and manifests, and the node
+  # address k3s reads).
+  flux = {
+    imports = [
+      inputs.sops-nix.nixosModules.sops
+      ./secrets.nix
+      ./network.nix
+      ./k3s.nix
+      ./flux.nix
+    ];
+  };
 }

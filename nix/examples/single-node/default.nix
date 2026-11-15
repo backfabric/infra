@@ -81,6 +81,16 @@
     ];
   };
 
+  # Flux syncs `clusters/example` of the private repository into the
+  # cluster, with the token `flux-git-token` from `secrets/common.yaml`.
+  backfabric.flux = {
+    enable = true;
+    repository = {
+      url = "https://github.com/example/fleet";
+      path = "./clusters/example";
+    };
+  };
+
   # A real host sets `hardware.facter.reportPath = ./facter.json;` instead,
   # with the report that `backfabric probe` generates with nixos-facter. This
   # excerpt has the shape of a real report of a Hetzner server (fields the

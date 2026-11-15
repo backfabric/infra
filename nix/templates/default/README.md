@@ -354,6 +354,47 @@ backfabric.postgres = {
 There are no backups yet. Status, connecting, and turning it off:
 [platform PostgreSQL](https://github.com/backfabric/infra/blob/main/docs/postgres.md).
 
+## Flux
+
+Everything inside the cluster comes from this repository through
+[Flux](https://github.com/backfabric/infra/blob/main/docs/flux.md): Flux
+applies `clusters/<host>/` and keeps the cluster equal to it (an object
+removed from the directory is deleted). The template has
+`clusters/node1/kustomization.yaml`, empty; rename the directory after your
+host. Upstream Helm charts go there as HelmRepository and HelmRelease
+objects, application secrets stay in OpenBao, never in Git.
+
+1. Push this repository to GitHub (private), if it is not there yet: Flux
+   fetches from GitHub, so every change must be pushed.
+2. Create a fine-grained personal access token: GitHub, Settings,
+   Developer settings, Personal access tokens, Fine-grained tokens; only
+   this repository; Repository permissions: Contents: Read-only, nothing
+   else. Note its expiry.
+3. `sops secrets/common.yaml`, add `flux-git-token: github_pat_...`, save.
+4. In `hosts/node1/default.nix`:
+
+   ```nix
+   backfabric.flux = {
+     enable = true;
+     repository = {
+       url = "https://github.com/<owner>/<repository>";
+       path = "./clusters/node1";
+     };
+   };
+   ```
+
+5. Commit, push, deploy:
+
+   ```sh
+   git add -A && git commit -m "feat: sync the cluster with Flux" && git push
+   backfabric deploy node1
+   ```
+
+6. Check on the host: `kubectl -n flux-system get fluxinstance,gitrepository,kustomization`
+   shows all three Ready, the GitRepository at your latest commit. From now
+   on a push to `clusters/node1/` reaches the cluster within about a
+   minute, without a deployment.
+
 ## Unlock after a reboot
 
 After every reboot the host waits for the LUKS passphrase in the initrd.
