@@ -56,7 +56,8 @@ requires them there for the flake to be `github:backfabric/infra`.
   [OpenBao](docs/openbao.md),
   [the audit telemetry collector](docs/otel.md),
   [the platform PostgreSQL](docs/postgres.md),
-  [Flux](docs/flux.md);
+  [Flux](docs/flux.md),
+  [kagent](docs/kagent.md);
   architectural decisions in [docs/adr/](docs/adr/).
 
 ## Private repository
@@ -197,6 +198,22 @@ nix flake init -t github:backfabric/infra
   token, `flux-git-token` in `backfabric.secrets.commonFile`, rendered into
   a Secret in `flux-system` without entering the Nix store. See
   [docs/flux.md](docs/flux.md).
+- `kagent` (off unless `backfabric.kagent.enable`):
+  [kagent](https://kagent.dev/) v1.0.1 and its Agent Substrate fork, the
+  agent platform ([ADR 0029](docs/adr/0029-kagent-agent-platform.md)),
+  installed by kagent's own installer, `kagent install`, run by Nix
+  ([ADR 0030](docs/adr/0030-kagent-installed-by-its-installer.md)). The
+  CLI is the release binary pinned by hash; a k3s manifest creates the
+  namespaces `kagent`, `ate-system` (Pod Security `privileged`) and
+  `podcertificate-controller-system` (`baseline`) and local volumes for
+  the bundled PostgreSQL and RustFS on `dataNode`; the oneshot
+  `kagent-install` runs the installer with the OpenAI provider, `model`,
+  and the API key `kagent-openai-api-key` from
+  `backfabric.secrets.commonFile`. A stamp in the cluster (ConfigMap
+  `kagent/backfabric-kagent-install`) makes it a no-op when nothing
+  changed, and a Lease lets one server at a time install. Needs k3s 1.37
+  or later. Turning it off uninstalls nothing (ordered teardown in the
+  runbook). See [docs/kagent.md](docs/kagent.md).
 
 ## Checks
 

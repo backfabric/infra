@@ -79,6 +79,49 @@
         hardware.disk = lib.take 1 exampleSingleNode.config.hardware.facter.report.hardware.disk;
       };
 
+      # The example host with kagent. The flake's nixpkgs has no k3s 1.37,
+      # which kagent needs (a real host takes it from its own nixpkgs, ADR
+      # 0002), so this variant is checked without being built: its assertion
+      # refuses k3s 1.36.
+      exampleWithKagent = exampleSingleNode.extendModules {
+        modules = [
+          {
+            backfabric.kagent = {
+              enable = true;
+              model = "gpt-5-mini";
+            };
+          }
+        ];
+      };
+
+      # What the kagent subsystem adds to a host: its oneshot, its k3s
+      # manifest and the API key's sops secret; for the example without and
+      # with it.
+      kagentCheck =
+        name: system: enabled:
+        let
+          inherit (system.config) systemd services sops;
+          found = {
+            unit = systemd.services ? kagent-install;
+            manifest = services.k3s.manifests ? kagent;
+            secret = sops.secrets ? kagent-openai-api-key;
+          };
+        in
+        assert lib.assertMsg (lib.all (v: v == enabled) (
+          lib.attrValues found
+        )) "${name}: expected ${lib.boolToString enabled}: ${builtins.toJSON found}";
+        nixpkgs.legacyPackages.x86_64-linux.writeText name (
+          builtins.unsafeDiscardStringContext (
+            builtins.toJSON (
+              found
+              // lib.optionalAttrs enabled {
+                execStart = systemd.services.kagent-install.serviceConfig.ExecStart;
+                manifest = services.k3s.manifests.kagent.content;
+              }
+            )
+          )
+        );
+
       # Evaluates the messages of the failed assertions of `system`, without
       # building it: none if `expected` is empty, else for each string in
       # `expected` a message that contains it.
@@ -184,6 +227,11 @@
         fleet-facts-without-report = fleetFacts "fleet-facts-without-report" exampleWithoutReport (
           lib.hasSuffix "/examples/single-node/facter.json"
         );
+        kagent-off = kagentCheck "kagent-off" exampleSingleNode false;
+        kagent-on = kagentCheck "kagent-on" exampleWithKagent true;
+        assertions-kagent-k3s = assertionsCheck "assertions-kagent-k3s" exampleWithKagent [
+          "backfabric.kagent needs Kubernetes 1.37 or later"
+        ];
         # The template right after `nix flake init`, and with the example host
         # (built as the template's `mkHost` builds a host; its toplevel is
         # `example-single-node`).

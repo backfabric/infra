@@ -1,0 +1,33 @@
+# kagent is installed by its own installer, run by Nix
+
+Amends ADR 0027 (for kagent and its Substrate fork) and ADR 0029.
+
+kagent and the Substrate fork it brings are installed in production by kagent's own upstream installer, `kagent install`, at a pinned version, run by Nix: the `kagent` subsystem (`nix/modules/kagent.nix`, runbook docs/kagent.md). Not by hand, and not by re-implementing its steps as k3s HelmCharts and scripts of our own.
+
+- The CLI is the release binary of kagent v1.0.1, pinned by hash in Nix (`nix/packages/kagent.nix`). It pins what it installs: kagent's charts 1.0.1, Substrate's 1.0.0, the bundled PostgreSQL by digest. An upgrade is a new CLI version.
+- Nix creates the three namespaces the installer uses before it runs, with the Pod Security level each needs, because the installer sets none and the cluster enforces `restricted`: `kagent` and `ate-system` `privileged`, `podcertificate-controller-system` `baseline`. It also provides static local volumes for the two claims the installer makes without a StorageClass, since the cluster has no provisioner.
+- A systemd oneshot, `kagent-install`, runs `kagent install` with helm and kubectl from nixpkgs, the OpenAI provider, the model from an option (through the CLI config's values files, an upstream knob), and the API key from sops. The CLI takes the key only from its environment, so the key is set for that one process; the CLI hands it to Helm in a 0600 file.
+- The unit runs at every boot and deployment on every server. What was installed is recorded in the cluster: a ConfigMap with a stamp, a SHA-256 over the CLI version, the install arguments, the model and the key. When it matches and kagent's release is deployed, the unit does nothing. Otherwise it takes a Kubernetes Lease (`coordination.k8s.io`), so that two servers never install at once, runs the installer, and writes the stamp only on success. A changed version, model or key runs the installer again: Helm upgrades, and the installer keeps the CAs and Secrets that exist. Because the marker is in the cluster, a reinstalled server does not install again.
+- Turning the subsystem off uninstalls nothing; the teardown is ordered and manual: kagent's own `kagent uninstall`, then the namespaces through `backfabric.k3s.removedManifests`.
+
+Our own code is the package (about 50 lines of Nix), the module's manifest, options and unit (about 160 lines of Nix), and the unit's script (about 100 lines of bash, shellchecked at build time).
+
+## Considered Options
+
+- The six upstream charts through `services.k3s.autoDeployCharts` (ADR 0027's path for the platform), with the installer's imperative steps rebuilt by us: a Nix-built `kubectl-ate` and a oneshot for the seven CA and JWT pool Secrets, a ConfigMap for the API server's token issuer, a oneshot running kagent's and Substrate's `setup.sql` against CloudNativePG with four connection-string Secrets, RustFS keys in sops passed through `valuesSecrets`, the chart values the CLI computes, and a two-step deployment for atelet before Substrate (k3s's Helm controller has no ordering and no `--wait`). Declarative and fully pinned, but several hundred lines of our own code re-implementing a moving 1.0 installer, which every upgrade has to be reconciled with.
+- `kagent install` by hand on a server (kagent's documented path): no own code, but not repeatable, not tied to the repository's state, and the key passes through an interactive shell.
+- The installer's `--dry-run` export (`install.sh` and values files) committed and applied by Nix: the export omits the installer's Go steps (the CA pools, the issuer ConfigMap, the bundled PostgreSQL), which would again be ours.
+
+## Consequences
+
+- kagent installs as upstream tests it, in its order, with readiness waits between steps, and an upgrade is a version bump. The price is an imperative step in the deployment: the first install takes 10 to 20 minutes and a deployment waits for it, and a failure shows as a failed unit, not as a k3s HelmChart.
+- The platform no longer comes entirely from `autoDeployCharts`: kagent's releases are Helm releases the CLI made (`helm list -A`), not k3s HelmCharts, and are not pruned by k3s.
+- At install time the cluster pulls kagent's and Substrate's charts from `ghcr.io` and most images by tag, not by digest; only the CLI, the chart versions, the bundled PostgreSQL and some images are pinned ([#110](https://github.com/backfabric/infra/issues/110)).
+- The installer's CA pools are valid for 365 days and nothing renews them; upstream documents only a replacement that interrupts workloads ([#108](https://github.com/backfabric/infra/issues/108)).
+- kagent's and Substrate's state is in the installer's bundled PostgreSQL, one instance on a local volume of one node, without backups, not in the platform's CloudNativePG (ADR 0025) ([#109](https://github.com/backfabric/infra/issues/109)).
+- The whole `kagent` namespace is `privileged`, because the installer puts the gVisor worker pool there; any pod created in it is unrestricted ([#111](https://github.com/backfabric/infra/issues/111)). `ate-system` is `privileged` for atelet, as Substrate requires.
+- kagent's auth mode stays `insecure` (the caller names its user) until agentgateway fronts it (ADR 0029); until then its Services stay ClusterIP and are reached only by port-forward on a server ([#112](https://github.com/backfabric/infra/issues/112)). RustFS runs with its chart's default credentials ([#113](https://github.com/backfabric/infra/issues/113)).
+- The key is in the cluster twice, in the Secret `kagent/kagent-openai` and in Helm's release records in `kagent`, both readable only by whoever may read Secrets there.
+- Every server must run the same configuration (version, model, key, data node); servers with different values would install in turns.
+- The Flux tenant `agents` (ADR 0027) is not where kagent's objects live: the installer's Harnesses, ModelConfig and worker pool are in `kagent`, and kagent resolves an Agent's Harness and AgentTemplate in the Agent's own namespace. Agents delivered by Flux come in a later PR, which either points the Flux tenant at `kagent` with a Role for `agents` and `agenttemplates` of `api.kagent.dev`, or gives `agents` its own Harness and worker pool (and with it `privileged`), sharing the ModelConfig through `allowedNamespaces`.
+- Kubernetes 1.37 is required; the subsystem refuses a configuration with an older `backfabric.k3s.package`.
