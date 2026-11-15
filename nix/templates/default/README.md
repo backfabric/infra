@@ -361,8 +361,8 @@ Everything inside the cluster comes from this repository through
 applies `clusters/<host>/` and keeps the cluster equal to it (an object
 removed from the directory is deleted). The template has
 `clusters/node1/kustomization.yaml`, empty; rename the directory after your
-host. Upstream Helm charts go there as HelmRepository and HelmRelease
-objects, application secrets stay in OpenBao, never in Git.
+host. Your own objects (agents, host values) go there; application
+secrets stay in OpenBao, never in Git.
 
 1. Push this repository to GitHub (private), if it is not there yet: Flux
    fetches from GitHub, so every change must be pushed.
@@ -394,6 +394,19 @@ objects, application secrets stay in OpenBao, never in Git.
    shows all three Ready, the GitRepository at your latest commit. From now
    on a push to `clusters/node1/` reaches the cluster within about a
    minute, without a deployment.
+
+Platform components every fleet shares (upstream Helm charts as
+HelmReleases) come from `kubernetes/<component>/` of backfabric/infra: add
+`clusters/node1/backfabric.yaml` with a GitRepository for
+`https://github.com/backfabric/infra`, pinned to the `backfabric` commit of
+`flake.lock`, and a Flux Kustomization per component with your overlays,
+and list it in `kustomization.yaml`; see
+[bases from backfabric/infra](https://github.com/backfabric/infra/blob/main/docs/flux.md#bases-from-backfabricinfra).
+After `nix flake update backfabric`, move the commit in the same commit:
+
+```sh
+nix eval --raw --impure --expr '(builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.backfabric.locked.rev'
+```
 
 ## Unlock after a reboot
 

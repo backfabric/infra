@@ -1,4 +1,4 @@
-# Flux (ADR 0031): GitOps for everything inside the cluster. Nix keeps the
+# Flux (ADR 0027): GitOps for everything inside the cluster. Nix keeps the
 # host, the disks, the network, k3s, and this bootstrap; Flux applies one
 # directory of the private repository to the cluster and keeps it there.
 # See docs/flux.md.

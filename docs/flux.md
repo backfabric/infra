@@ -1,7 +1,7 @@
 # Flux
 
 The `flux` subsystem makes the private repository the source of everything
-inside the cluster ([ADR 0031](adr/0031-flux-for-cluster-workloads.md)).
+inside the cluster ([ADR 0027](adr/0027-flux-for-cluster-workloads.md)).
 Nix installs the [Flux Operator](https://fluxoperator.dev/) and one
 FluxInstance; Flux then applies one directory of the repository (e.g.
 `clusters/node1/`) and keeps the cluster equal to it. The host, disks,
@@ -99,12 +99,75 @@ Every object Flux applies from it carries the labels
 `kustomize.toolkit.fluxcd.io/namespace: flux-system`. An object removed
 from the directory is deleted from the cluster (prune). Upstream Helm
 charts are installed as HelmRepository or OCIRepository plus HelmRelease
-objects in that directory, with values, not copies of the chart. Order
-between parts is expressed with further Flux Kustomizations and
-`dependsOn` / `wait`.
+objects, with values, not copies of the chart. Order between parts is
+expressed with further Flux Kustomizations and `dependsOn` / `wait`.
 
 Nothing Flux applies may conflict with the manifests Nix deploys through
 k3s (`kubectl -n kube-system get addon`): one owner per object.
+
+## Bases from backfabric/infra
+
+Cluster content that every fleet shares (the platform's HelmReleases)
+lives in this public repository, under
+[`kubernetes/`](../kubernetes/README.md), one kustomize base per component:
+`kubernetes/<component>/`. The private repository stays the root source:
+its `clusters/<host>/` declares a second GitRepository for
+backfabric/infra, pinned to a commit, and one Flux Kustomization per base
+it wants, with host-specific overlays; its own objects (agents, host
+values) sit next to them. Flux's standard multi-repository layout; the
+bootstrap needs nothing for it, since the synced Kustomization may create
+Flux objects.
+
+`clusters/node1/backfabric.yaml`, listed in its `kustomization.yaml`:
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: backfabric
+  namespace: flux-system
+spec:
+  url: https://github.com/backfabric/infra   # public: no secretRef
+  ref:
+    commit: <the backfabric rev in flake.lock>
+  interval: 1h
+  ignore: |
+    /*
+    !/kubernetes/
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: <component>
+  namespace: flux-system
+spec:
+  sourceRef:
+    kind: GitRepository
+    name: backfabric
+  path: ./kubernetes/<component>
+  interval: 10m
+  prune: true
+  wait: true
+  # dependsOn: [{ name: <another component> }]
+  # Host overlays: kustomize patches on the base's objects, e.g. a
+  # HelmRelease's values.
+  # patches:
+  #   - target: { kind: HelmRelease, name: <component> }
+  #     patch: |
+  #       - op: add
+  #         path: /spec/values/replicaCount
+  #         value: 1
+```
+
+Pin the same commit as the `backfabric` input in `flake.lock`, so that
+the host's modules and the cluster's bases come from one version of this
+repository, and change both in one commit:
+
+```sh
+nix flake update backfabric
+nix eval --raw --impure --expr '(builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.backfabric.locked.rev'
+# set ref.commit in clusters/<host>/backfabric.yaml to it, commit, push
+```
 
 ## Status
 

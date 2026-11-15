@@ -6,7 +6,8 @@ Everything inside the cluster is delivered by [Flux](https://fluxcd.io/) from th
 - The FluxInstance's sync block makes the operator generate the GitRepository and the Kustomization (prune) for one directory of the private repository, as `flux bootstrap` names them (`flux-system`), without Flux ever writing into the repository.
 - The repository is fetched over HTTPS with a read-only GitHub token from the host's sops, rendered into a Kubernetes Secret on the host's tmpfs and applied by k3s; the token is never in the Nix store, an argument, or a log. A GitHub App (`provider: github`) can replace it later without changing the design.
 - The synced directory is applied with the controllers' own identity (cluster-admin, Flux's single-tenant default): the private repository already controls the hosts as root, so a narrower identity would not narrow who controls the cluster.
-- Upstream charts are installed as they are published, as HelmRelease objects with values in the private repository, never copied or rewritten. Bootstrap secrets stay in the host's sops; application secrets live in OpenBao (ADR 0009) and reach the cluster through External Secrets Operator, never in Git: Flux decrypts nothing.
+- Upstream charts are installed as they are published, as HelmRelease objects with values, never copied or rewritten. Bootstrap secrets stay in the host's sops; application secrets live in OpenBao (ADR 0009) and reach the cluster through External Secrets Operator, never in Git: Flux decrypts nothing.
+- Two repositories, the private one as the root: what every fleet shares (the platform's HelmReleases) is a kustomize base per component under `kubernetes/` of this public repository; the private repository's `clusters/<host>/` pulls it through a second GitRepository pinned to the same commit as its `flake.lock`, and adds host overlays and its own objects (agents). Flux's standard multi-repository layout; host modules and cluster bases come from one version of this repository.
 
 ## Considered Options
 
@@ -24,3 +25,4 @@ Everything inside the cluster is delivered by [Flux](https://fluxcd.io/) from th
 - The cluster pulls the operator's and Flux's images from `ghcr.io` (by digest), and needs GitHub to apply changes; what runs keeps running without either.
 - The token is the operator's to create, store in sops, and renew before it expires; an expired token stops delivery, not workloads. Replacing it restarts k3s (pods keep running).
 - Upgrading Flux or the operator is a change of version, hash and digest in `nix/modules/flux.nix` and a deployment.
+- Shared cluster content in `kubernetes/` changes with this repository's commits; a fleet takes it, together with the modules, by moving its pin. Keeping the GitRepository's commit equal to `flake.lock` is the operator's step (documented), not enforced by code.
