@@ -20,6 +20,10 @@ in the same PR.
   and location of sops admin keys, SSH client keys and agents, the password
   manager, `~/.ssh` (documented lines the user adds by hand, never written by
   code).
+- Never describe the operator's own hosts or infrastructure (their names,
+  what runs on them, their state) in the repository, commit messages, issues
+  or PR bodies. The example host `node1` in docs and templates is a
+  documentation value only; deploy steps in PR bodies use `<host>`.
 
 ## Workflow
 
